@@ -26,7 +26,7 @@ def init_db():
                 api_token TEXT UNIQUE,
                 active_guild_id TEXT,
                 active_voice_channel_id TEXT,
-                selected_sound TEXT DEFAULT 'default_cheer.mp3',
+                selected_sound TEXT,
                 created_at REAL,
                 last_active REAL
             )

@@ -76,39 +76,37 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
             except OSError:
                 pass
 
-# ── Soundboard Manager (Server Guild Scoped + Physical Sound Files) ─────────
+# ── Soundboard Manager (100% User & Server Scoped, No Artificial Defaults) ──
 def get_guild_sound_library(guild_id: str = None) -> list[str]:
     """
-    Returns server-specific uploaded sounds combined with physical disk files and default starter sounds.
+    Returns server-specific uploaded sounds and physical disk sound files.
+    No hardcoded default sounds.
     """
-    default_sounds = ["default_cheer.mp3", "default_airhorn.mp3"]
-    
-    # 1. Fetch all physical files on disk
+    # 1. Physical files on disk
     dir_path = utils.full_path(SOUNDS_DIR_NAME)
     disk_files = []
     if os.path.exists(dir_path):
         disk_files = [f for f in os.listdir(dir_path) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
 
-    # 2. Fetch database records for this guild
+    # 2. Database records for this guild
     db_filenames = []
     if guild_id:
         guild_records = database.get_guild_sounds(str(guild_id))
         db_filenames = [r["filename"] for r in guild_records if r.get("filename")]
 
-    # Combine physical files + db records + default starter sounds (deduplicated)
-    combined = list(dict.fromkeys(db_filenames + disk_files + default_sounds))
+    combined = list(dict.fromkeys(db_filenames + disk_files))
     return sorted(combined)
 
 def get_random_sound_for_guild(guild_id: str = None) -> str:
     sounds = get_guild_sound_library(guild_id)
-    return random.choice(sounds)
+    return random.choice(sounds) if sounds else None
 
 def build_soundboard_embed(sounds: list[str], title_label: str) -> discord.Embed:
-    """Builds a multi-column Discord Embed displaying the ENTIRE soundboard library without cutoffs."""
+    """Builds a multi-column Discord Embed displaying the soundboard library."""
     embed = discord.Embed(title=title_label, color=discord.Color.purple())
     
     if not sounds:
-        embed.description = "No custom sounds uploaded yet."
+        embed.description = "No custom sounds uploaded yet. Use `/upload` or `>upload` to add your first goal celebration sound!"
         return embed
 
     chunk_size = 20
@@ -248,13 +246,18 @@ def play_sound_in_vc(voice_client, sound_filename: str):
         logger.warn("Voice client not connected.")
         return False
 
+    if not sound_filename:
+        logger.warn("No sound file specified or available to play.")
+        return False
+
     if voice_client.is_playing():
         logger.info("Voice client already playing audio — overlapping goal skipped.")
         return False
 
     sound_path = utils.full_path(SOUNDS_DIR_NAME, sound_filename)
     if not os.path.exists(sound_path):
-        sound_path = utils.full_path(SOUNDS_DIR_NAME, "default_cheer.mp3")
+        logger.error(f"Sound file not found on disk: {sound_path}")
+        return False
 
     ffmpeg_exec = utils.full_path(FFMPEG_NAME)
     if not os.path.exists(ffmpeg_exec):
@@ -329,6 +332,9 @@ async def handle_goal_webhook(request):
             return web.json_response({"error": f"Failed to connect to voice: {e}"}, status=500)
 
     sound_to_play = data.get("sound") or get_random_sound_for_guild(guild_id)
+    if not sound_to_play:
+        return web.json_response({"error": "No custom sounds uploaded for this server yet. Run /upload in Discord!"}, status=404)
+
     success = play_sound_in_vc(voice_client, sound_to_play)
     if success:
         database.record_goal_stat(discord_user_id, guild_id, sound_to_play)
@@ -481,6 +487,9 @@ async def slash_play(interaction: discord.Interaction, sound_name: str = None):
         await interaction.followup.send("❌ Bot is not in a voice channel. Run `/join` or `>join` first.")
         return
     sound_to_play = sound_name or get_random_sound_for_guild(str(interaction.guild_id))
+    if not sound_to_play:
+        await interaction.followup.send("❌ No sounds in soundboard. Run `/upload` to add a sound first!")
+        return
     success = play_sound_in_vc(interaction.guild.voice_client, sound_to_play)
     if success:
         await interaction.followup.send(f"▶ Playing **`{sound_to_play}`**!")
@@ -529,6 +538,9 @@ async def cmd_play(ctx, sound_name: str = None):
         await ctx.send("❌ Bot is not in a voice channel. Run `>join` or `/join` first.")
         return
     sound_to_play = sound_name or get_random_sound_for_guild(str(ctx.guild.id))
+    if not sound_to_play:
+        await ctx.send("❌ No sounds in soundboard. Run `>upload` to add a sound first!")
+        return
     success = play_sound_in_vc(ctx.guild.voice_client, sound_to_play)
     if success:
         await ctx.send(f"▶ Playing **`{sound_to_play}`**!")
