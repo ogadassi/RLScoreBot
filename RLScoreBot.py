@@ -150,14 +150,12 @@ async def fetch_random_chat_history(guild):
         random_time = start_date + timedelta(seconds=random_seconds)
 
         messages = []
-        # Fetch up to 50 messages starting after the random time
         async for msg in target_channel.history(limit=50, after=random_time):
             if msg.author.bot or not msg.content.strip():
                 continue
             messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
             
         if not messages:
-            # Fallback: just fetch the latest 50 messages if the random date was empty
             async for msg in target_channel.history(limit=50):
                 if msg.author.bot or not msg.content.strip():
                     continue
@@ -175,16 +173,14 @@ async def fetch_random_chat_history(guild):
 
 async def generate_status_from_chat(chat_text: str, api_key: str) -> tuple[str, str]:
     """
-    Exact Legacy Prompting & Multi-Model Endpoint Fallback
+    Exact Legacy Prompting & Valid Active Gemini Endpoint Models
     """
     models_to_try = [
-        "gemini-2.5-flash",
         "gemini-2.0-flash",
-        "gemini-2.5-pro",
-        "gemini-1.5-pro"
+        "gemini-2.0-flash-exp",
+        "gemini-1.5-flash-8b"
     ]
 
-    # Exact Legacy Prompt
     prompt = (
         "Below is a segment of chat history from a Discord channel.\n"
         "Generate a funny, concise custom status for a bot based on this chat.\n"
@@ -205,7 +201,7 @@ async def generate_status_from_chat(chat_text: str, api_key: str) -> tuple[str, 
         for model in models_to_try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
-                async with session.post(url, json=payload, timeout=30) as response:
+                async with session.post(url, json=payload, timeout=20) as response:
                     if response.status == 200:
                         data = await response.json()
                         candidates = data.get('candidates', [])
@@ -217,8 +213,9 @@ async def generate_status_from_chat(chat_text: str, api_key: str) -> tuple[str, 
                                     status_text = status_text[1:-1].strip()
                                 return status_text[:120], f"Model {model}"
                     elif response.status == 429:
-                        last_error = "Gemini API rate limited (HTTP 429). Please wait before requesting again."
+                        last_error = f"Gemini {model} rate limited (HTTP 429). Retrying next model..."
                         logger.warn(last_error)
+                        await asyncio.sleep(1)
                     else:
                         err_text = await response.text()
                         last_error = f"Gemini {model} HTTP {response.status}: {err_text[:100]}"
