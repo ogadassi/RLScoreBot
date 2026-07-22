@@ -67,45 +67,51 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
             except OSError:
                 pass
 
-# ── Robust Gemini AI Status Generation Engine ───────────────────────────────
+# ── Randomized Historical Gemini AI Status Generation Engine ───────────────
 async def fetch_random_chat_history(guild):
     """
-    Scans ALL text channels in the guild for readable message history.
+    Randomized historical chat sampler:
+    Picks a random text channel and samples 50 messages from a random point in time
+    (ranging from channel creation to present) to unearth old classic inside jokes.
     """
-    candidate_channels = []
-    
-    # 1. Preferred channels
-    for channel in guild.text_channels:
-        if channel.name.lower() in ["general", "chat", "main", "discussion", "lobby"]:
-            candidate_channels.append(channel)
-
-    # 2. Remaining readable channels
-    for channel in guild.text_channels:
-        if channel not in candidate_channels:
-            perms = channel.permissions_for(guild.me)
-            if perms.read_messages and perms.read_message_history:
-                candidate_channels.append(channel)
+    candidate_channels = [
+        c for c in guild.text_channels 
+        if c.permissions_for(guild.me).read_message_history and c.permissions_for(guild.me).read_messages
+    ]
 
     if not candidate_channels:
         logger.warn("No accessible text channels found in guild.")
         return None, "No readable text channels found."
 
+    random.shuffle(candidate_channels)
+
     for channel in candidate_channels:
         try:
+            created_at = channel.created_at
+            now = _dt.now(timezone.utc)
+            delta_days = (now - created_at).days
+
+            # Pick a random point in time if channel has history > 3 days
+            before_date = None
+            if delta_days > 3:
+                random_offset_days = random.randint(0, delta_days - 1)
+                before_date = now - timedelta(days=random_offset_days)
+
             messages = []
-            async for msg in channel.history(limit=50):
+            async for msg in channel.history(limit=50, before=before_date):
                 if msg.author.bot or not msg.content.strip():
                     continue
                 messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
                 
-            if messages:
-                logger.info(f"Fetched {len(messages)} messages from channel #{channel.name}")
-                return "\n".join(reversed(messages)), f"Channel #{channel.name}"
+            if len(messages) >= 3:
+                logger.info(f"Sampled {len(messages)} historical messages from #{channel.name}")
+                sample_label = f"#{channel.name} ({'Random Archive' if before_date else 'Recent'})"
+                return "\n".join(reversed(messages)), sample_label
         except Exception as e:
-            logger.warn(f"Could not read channel #{channel.name}: {e}")
+            logger.warn(f"Could not sample channel #{channel.name}: {e}")
             continue
 
-    return None, "No text messages found in server channels."
+    return None, "No text messages found in server history."
 
 async def generate_status_from_chat(chat_log: str, api_key: str) -> tuple[str, str]:
     models_to_try = [
@@ -425,7 +431,7 @@ async def cmd_status_sync(ctx):
         await ctx.send("❌ Permission denied. `>status_sync` is restricted to bot owner and server administrators.")
         return
 
-    msg = await ctx.send("⏳ Reading server chat history and calling Gemini AI...")
+    msg = await ctx.send("⏳ Sampling random historical chat history and calling Gemini AI...")
     status_text, diagnostic_info = await update_bot_status(ctx.guild)
     
     if status_text != "Watching Rocket League ⚽ | >join":
