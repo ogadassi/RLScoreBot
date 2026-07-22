@@ -17,7 +17,6 @@ from dotenv import load_dotenv
 
 import utils
 import logger
-import database
 import score_detector
 
 load_dotenv()
