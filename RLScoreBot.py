@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 import random
 import re
 import json
@@ -23,9 +24,10 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 SOUNDS_DIR_NAME = "sounds"
 FFMPEG_NAME     = "ffmpeg.exe"
 
-_bot_start_time = _dt.now()
-_session_goals  = 0
-_session_plays  = 0
+_bot_start_time      = _dt.now()
+_session_goals       = 0
+_session_plays       = 0
+_shutdown_exit_code  = 0   # set before bot.close(); read by __main__ after asyncio.run()
 
 _stats_path = utils.full_path("stats.json")
 
@@ -753,9 +755,13 @@ async def monitor_game_status():
                 pass
 
         await asyncio.sleep(0.5)
+        # Set exit code BEFORE closing — bot.close() cancels this task so any
+        # code after it is never reached. __main__ reads _shutdown_exit_code
+        # after asyncio.run() returns and calls sys.exit() there.
+        global _shutdown_exit_code
+        _shutdown_exit_code = 2
         await bot.close()
-        import sys
-        sys.exit(2)
+        return
 
     # ── Startup grace period: don't act on "not running" before we've ever seen RL
     uptime = (_dt.now() - _bot_start_time).total_seconds()
@@ -765,9 +771,10 @@ async def monitor_game_status():
     # ── RL not running and grace period expired → shutdown
     if not rl_running and not bot._rl_was_running:
         logger.warn("Rocket League was never detected within 60s of bot start. Shutting down.")
+        global _shutdown_exit_code
+        _shutdown_exit_code = 2
         await bot.close()
-        import sys
-        sys.exit(2)
+        return
 
     # ── RL is running ─────────────────────────────────────────────────────────
     if rl_running:
@@ -873,3 +880,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    sys.exit(_shutdown_exit_code)
