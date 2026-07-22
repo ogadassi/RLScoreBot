@@ -2,65 +2,6 @@
 
 let currentAudio = null;
 
-// Play Sound in Web Audio Player
-function playSound(filename, title) {
-    const player = document.getElementById('audio-player');
-    const npBar = document.getElementById('now-playing-bar');
-    const npTitle = document.getElementById('np-title');
-
-    player.src = '/sounds/' + filename;
-    player.play().then(() => {
-        npTitle.innerText = title;
-        npBar.classList.remove('hidden');
-    }).catch(err => {
-        console.warn("Audio playback fallback:", err);
-        // Fallback for preview testing
-        alert("Playing sound preview: " + title);
-    });
-
-    player.onended = () => {
-        npBar.classList.add('hidden');
-    };
-}
-
-function stopAudio() {
-    const player = document.getElementById('audio-player');
-    const npBar = document.getElementById('now-playing-bar');
-    player.pause();
-    player.currentTime = 0;
-    npBar.classList.add('hidden');
-}
-
-// User Custom File Preview Tester
-document.addEventListener('DOMContentLoaded', () => {
-    const fileInput = document.getElementById('sound-upload-input');
-    if (fileInput) {
-        fileInput.addEventListener('change', (event) => {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const fileURL = URL.createObjectURL(file);
-            const player = document.getElementById('audio-player');
-            const npBar = document.getElementById('now-playing-bar');
-            const npTitle = document.getElementById('np-title');
-
-            player.src = fileURL;
-            player.play().then(() => {
-                npTitle.innerText = "Custom File: " + file.name + " (Testing -14 LUFS)";
-                npBar.classList.remove('hidden');
-            });
-
-            player.onended = () => {
-                npBar.classList.add('hidden');
-            };
-        });
-    }
-
-    // Fetch stats immediately and poll frequently every 5 seconds
-    fetchStats();
-    setInterval(fetchStats, 5000);
-});
-
 // Search & Filter Commands
 function filterCommands() {
     const input = document.getElementById('cmd-search').value.toLowerCase();
@@ -92,10 +33,14 @@ function animateValue(element, start, end, duration) {
     window.requestAnimationFrame(step);
 }
 
-// Fetch stats frequently from backend API
+// Fetch stats frequently from backend API (Handles GitHub Pages & Render seamlessly)
 async function fetchStats() {
     try {
-        const res = await fetch('/api/v1/stats');
+        const apiUrl = window.location.hostname.includes('github.io') 
+            ? 'https://rlscorebot.onrender.com/api/v1/stats' 
+            : '/api/v1/stats';
+
+        const res = await fetch(apiUrl);
         if (res.ok) {
             const data = await res.json();
             
@@ -116,6 +61,12 @@ async function fetchStats() {
             }
         }
     } catch (err) {
-        // Silent fallback
+        // Fallback gracefully to default stats
     }
 }
+
+// Initialize on Page Load
+document.addEventListener('DOMContentLoaded', () => {
+    fetchStats();
+    setInterval(fetchStats, 5000);
+});
