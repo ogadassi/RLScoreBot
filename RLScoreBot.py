@@ -67,40 +67,53 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
             except OSError:
                 pass
 
-# ── Gemini AI Status Generation ─────────────────────────────────────────────
+# ── Robust Gemini AI Status Generation Engine ───────────────────────────────
 async def fetch_random_chat_history(guild):
-    general_channel = None
+    """
+    Robust chat history fetcher:
+    Searches ALL text channels in the guild, prioritizing #general / #chat,
+    and falls back to any active text channel with user messages.
+    """
+    candidate_channels = []
+    
+    # 1. Look for preferred channels first
     for channel in guild.text_channels:
-        if channel.name.lower() in ["general", "chat", "main"]:
-            general_channel = channel
-            break
-            
-    if not general_channel and guild.text_channels:
-        general_channel = guild.text_channels[0]
+        if channel.name.lower() in ["general", "chat", "main", "discussion", "lobby"]:
+            candidate_channels.append(channel)
 
-    if not general_channel:
+    # 2. Append all remaining readable text channels
+    for channel in guild.text_channels:
+        if channel not in candidate_channels and channel.permissions_for(guild.me).read_message_history:
+            candidate_channels.append(channel)
+
+    if not candidate_channels:
+        logger.warn("No accessible text channels found in guild.")
         return None
 
-    try:
-        messages = []
-        async for msg in general_channel.history(limit=50):
-            if msg.author.bot or not msg.content.strip():
-                continue
-            messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
-            
-        if not messages:
-            return None
-        return "\n".join(messages)
-    except Exception as e:
-        logger.warn(f"Failed to fetch chat history: {e}")
-        return None
+    # Try channels until we get a non-empty chat history
+    for channel in candidate_channels:
+        try:
+            messages = []
+            async for msg in channel.history(limit=50):
+                if msg.author.bot or not msg.content.strip():
+                    continue
+                messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
+                
+            if len(messages) >= 3:
+                logger.info(f"Fetched {len(messages)} messages from channel #{channel.name}")
+                return "\n".join(reversed(messages))
+        except Exception as e:
+            logger.warn(f"Could not read channel #{channel.name}: {e}")
+            continue
+
+    return None
 
 async def generate_status_from_chat(chat_log: str, api_key: str) -> str:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
     prompt = (
-        "Below is a chat log from a Discord server's general chat. "
+        "Below is a chat log from a Discord server's conversation. "
         "Create a funny, short, iconic 1-sentence Discord status (under 100 characters) "
-        "that captures the vibe or inside jokes of the conversation. Output ONLY the status text.\n\n"
+        "that captures the vibe, humor, or inside jokes of the conversation. Output ONLY the status text.\n\n"
         f"CHAT LOG:\n{chat_log}"
     )
     payload = {
@@ -109,7 +122,7 @@ async def generate_status_from_chat(chat_log: str, api_key: str) -> str:
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, timeout=15) as response:
+            async with session.post(url, json=payload, timeout=20) as response:
                 if response.status == 200:
                     data = await response.json()
                     candidates = data.get('candidates', [])
@@ -118,6 +131,9 @@ async def generate_status_from_chat(chat_log: str, api_key: str) -> str:
                         if parts:
                             status_text = parts[0]['text'].strip().strip('"').strip("'")
                             return status_text[:120]
+                else:
+                    err_text = await response.text()
+                    logger.error(f"Gemini API error ({response.status}): {err_text}")
                 return None
     except Exception as e:
         logger.warn(f"Gemini API status generation failed: {e}")
@@ -384,6 +400,15 @@ async def cmd_play(ctx, sound_name: str = None):
         await ctx.send(f"▶ Playing **`{sound_to_play}`**!")
     else:
         await ctx.send("⏯️ Bot is already playing a sound.")
+
+@bot.command(name="status_sync", help="Manually trigger an AI status sync from server chat history.")
+async def cmd_status_sync(ctx):
+    msg = await ctx.send("⏳ Reading server chat history and generating AI status...")
+    status_text = await update_bot_status(ctx.guild)
+    if status_text:
+        await msg.edit(content=f"✅ Status updated to: \"{status_text}\"")
+    else:
+        await msg.edit(content="❌ Could not generate status. Ensure GEMINI_API_KEY is set on Render.")
 
 @bot.command(name="stats", help="Display goal statistics.")
 async def cmd_stats(ctx):
