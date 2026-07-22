@@ -76,25 +76,45 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
             except OSError:
                 pass
 
-# ── Soundboard Manager (100% Upload Order, Single Clean List) ─────────────────
+# ── Soundboard Manager (Manifest + Database File Creation Time Ordering) ──────
 def get_guild_sound_library(guild_id: str = None) -> list[str]:
     """
-    Returns server-specific uploaded sounds in exact order of upload (oldest upload -> newest upload).
-    No alphabetical sorting.
+    Returns server-specific uploaded sounds sorted strictly by their true file creation 
+    timestamp recorded from your PC (file_timestamps.json) or database upload timestamp.
     """
-    db_filenames = []
+    sounds_dir = utils.full_path(SOUNDS_DIR_NAME)
+    manifest_path = utils.full_path("file_timestamps.json")
+    
+    file_timestamps = {}
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                file_timestamps = json.load(f)
+        except Exception:
+            pass
+
+    # 1. Fetch DB records created_at timestamp
     if guild_id:
         guild_records = database.get_guild_sounds(str(guild_id))
-        db_filenames = [r["filename"] for r in guild_records if r.get("filename")]
+        for r in guild_records:
+            fname = r.get("filename")
+            if fname and (fname not in file_timestamps or file_timestamps[fname] == 0):
+                file_timestamps[fname] = r.get("created_at") or 0.0
 
-    sounds_dir = utils.full_path(SOUNDS_DIR_NAME)
-    disk_files = []
+    # 2. Add any remaining disk files
     if os.path.exists(sounds_dir):
-        disk_files = [f for f in os.listdir(sounds_dir) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
+        for f in os.listdir(sounds_dir):
+            if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a')):
+                if f not in file_timestamps:
+                    full_p = os.path.join(sounds_dir, f)
+                    try:
+                        file_timestamps[f] = os.path.getmtime(full_p)
+                    except OSError:
+                        file_timestamps[f] = 0.0
 
-    # Combine in exact order of DB upload ID / insertion (no alphabetical sorting)
-    combined = list(dict.fromkeys(db_filenames + disk_files))
-    return combined
+    # Sort all filenames strictly by timestamp ascending (oldest file on your PC -> newest file)
+    sorted_filenames = sorted(file_timestamps.keys(), key=lambda fname: (file_timestamps[fname], fname))
+    return sorted_filenames
 
 def get_random_sound_for_guild(guild_id: str = None) -> str:
     sounds = get_guild_sound_library(guild_id)
@@ -114,7 +134,6 @@ def build_soundboard_embed(sounds: list[str], title_label: str) -> discord.Embed
     if len(full_text) <= 4000:
         embed.description = full_text
     else:
-        # If over 4,000 chars, use seamless fields with invisible headers (\u200b)
         embed.description = lines[0]
         chunk_size = 30
         for i in range(1, len(sounds), chunk_size):
@@ -481,6 +500,19 @@ async def do_upload(user_id: str, guild_id: str, filename: str, file_bytes: byte
 
     ok, msg = await normalize_audio(target_path)
     database.add_guild_sound(user_id, str(guild_id), safe_basename, clean_title, target_path)
+
+    # Automatically save upload timestamp into file_timestamps.json manifest
+    manifest_path = utils.full_path("file_timestamps.json")
+    try:
+        ts_data = {}
+        if os.path.exists(manifest_path):
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                ts_data = json.load(f)
+        ts_data[safe_basename] = _dt.now().timestamp()
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(ts_data, f, indent=2)
+    except Exception as e:
+        logger.warn(f"Failed to update file_timestamps.json: {e}")
 
     embed = discord.Embed(
         title="🎵 New Sound Uploaded to Server Soundboard!",
