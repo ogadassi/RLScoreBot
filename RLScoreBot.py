@@ -1,523 +1,375 @@
 import asyncio
 import os
 import random
+import re
+import json
+import time
+import sqlite3
+import aiohttp
+import functools
+import cv2
+import numpy as np
+from PIL import ImageGrab
+from datetime import datetime as _dt, timezone
 import discord
-import requests
 from discord.ext import commands, tasks
-from itertools import count, filterfalse
 from dotenv import load_dotenv
 
 import utils
-import score_detector
 import logger
-
-import aiohttp
+import database
+import score_detector
 
 load_dotenv()
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-OWNER_ID      = int(os.getenv("OWNER_ID", "0"))
+DISCORD_TOKEN  = os.getenv("DISCORD_TOKEN")
+OWNER_ID       = int(os.getenv("OWNER_ID", "0"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# ── Constants ─────────────────────────────────────────────────────────────────
 SOUNDS_DIR_NAME = "sounds"
 FFMPEG_NAME     = "ffmpeg.exe"
-TARGET_LUFS     = -14
 
-def is_rl_running():
-    """Check if Rocket League is running. Uses fast Win32 window check first, falling back to tasklist."""
-    import win32gui
-    if win32gui.FindWindow(None, "Rocket League") != 0:
-        return True
-
-    import subprocess
-    result = subprocess.run(
-        ["tasklist", "/FI", "IMAGENAME eq RocketLeague.exe", "/NH"],
-        capture_output=True,
-        text=True,
-        creationflags=0x08000000, # CREATE_NO_WINDOW
-    )
-    return "rocketleague.exe" in result.stdout.lower()
-
-# ── Owner-only check ──────────────────────────────────────────────────────────
-def owner_only():
-    """Command check that restricts usage to the bot owner."""
-    async def predicate(ctx):
-        if ctx.author.id != OWNER_ID:
-            await ctx.send("🔒 You don't have permission to use that command.")
-            return False
-        return True
-    return commands.check(predicate)
-
-sounds = {}
-
-intents = discord.Intents().all()
-bot = commands.Bot(command_prefix='>', intents=intents, help_command=None)
-
-# ── Sound loading ─────────────────────────────────────────────────────────────
-
-# ── Stats ─────────────────────────────────────────────────────────────────────
-import json
-from datetime import datetime as _dt, timezone, timedelta
-
-STATS_FILE = utils.full_path("stats.json")
-
-# Persistent (written to stats.json)
-_stats: dict = {"total_goals": 0, "play_counts": {}}
-# Session-only (reset each run)
+_bot_start_time = _dt.now()
 _session_goals  = 0
 _session_plays  = 0
-_bot_start_time = _dt.now()
+
+_stats_path = utils.full_path("stats.json")
 
 def load_stats():
-    global _stats
-    if os.path.isfile(STATS_FILE):
+    if os.path.isfile(_stats_path):
         try:
-            with open(STATS_FILE, encoding="utf-8") as f:
-                _stats = json.load(f)
-            _stats.setdefault("total_goals", 0)
-            _stats.setdefault("play_counts", {})
-            total_plays = sum(_stats["play_counts"].values())
-            logger.info(f"Stats loaded: {_stats['total_goals']} goals, {total_plays} sound plays recorded all-time.")
-        except Exception as e:
-            logger.warn(f"Failed to load stats: {e}. Starting fresh.")
-            _stats = {"total_goals": 0, "play_counts": {}}
-    else:
-        logger.info("No stats.json found, starting with empty statistics.")
-        _stats = {"total_goals": 0, "play_counts": {}}
+            with open(_stats_path, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"total_goals": 0, "play_counts": {}}
 
-def save_stats():
+def save_stats(data):
     try:
-        with open(STATS_FILE, "w", encoding="utf-8") as f:
-            json.dump(_stats, f, indent=2)
+        with open(_stats_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
     except Exception as e:
-        logger.warn(f"Could not save stats: {e}")
+        logger.error(f"Failed to save stats.json: {e}")
 
-def record_play(sound_file: str):
-    global _session_plays
-    _session_plays += 1
-    _stats["play_counts"][sound_file] = _stats["play_counts"].get(sound_file, 0) + 1
-    save_stats()
+_stats = load_stats()
 
 def record_goal():
-    global _session_goals
+    global _session_goals, _stats
     _session_goals += 1
-    _stats["total_goals"] += 1
-    save_stats()
+    _stats["total_goals"] = _stats.get("total_goals", 0) + 1
+    save_stats(_stats)
 
-# ── Sound loading ─────────────────────────────────────────────────────────────
+def record_play(sound_filename):
+    global _session_plays, _stats
+    _session_plays += 1
+    counts = _stats.setdefault("play_counts", {})
+    counts[sound_filename] = counts.get(sound_filename, 0) + 1
+    save_stats(_stats)
 
-def load_sounds():
-    global sounds
-    sounds = {}
+def normalize_name(s):
+    base, _ = os.path.splitext(s.lower())
+    return re.sub(r'[\s_\-]+', '', base)
+
+def scan_sounds():
     dir_path = utils.full_path(SOUNDS_DIR_NAME)
+    if not os.path.isdir(dir_path):
+        logger.error(f"Sounds directory missing at: {dir_path}")
+        return {}
+    sound_map = {}
+    for filename in os.listdir(dir_path):
+        if filename.endswith(".mp3"):
+            norm = normalize_name(filename)
+            sound_map[norm] = filename
+    return sound_map
 
-    sound_id = 1
-
-    if not os.path.exists(dir_path):
-        logger.warn(f"Sounds directory missing — creating at {dir_path}")
-        os.makedirs(dir_path)
-
-    for filename in sorted(os.listdir(dir_path)):
-        sounds[sound_id] = filename
-        sound_id += 1
-
-    logger.sound_loaded(len(sounds))
-
+sounds = scan_sounds()
 
 def random_sound():
     if not sounds:
         return None
     return random.choice(list(sounds.values()))
 
-
-def play_sound(voice_client, sound_file):
-    if not sound_file:
-        logger.warn("play_sound called with no sound file.")
-        return
-
+def play_sound(voice_client, sound_filename):
     if not voice_client or not voice_client.is_connected():
-        logger.warn("Attempted to play sound but voice client is not connected.")
+        logger.warn("Voice client not connected.")
         return
-
+    if not sound_filename:
+        logger.warn("No sound available to play.")
+        return
     if voice_client.is_playing():
-        logger.info("Already playing — skipped.")
+        logger.info("Already playing audio — goal skipped.")
         return
+    sound_path = utils.full_path(SOUNDS_DIR_NAME, sound_filename)
+    if not os.path.isfile(sound_path):
+        logger.error(f"Sound file missing: {sound_path}")
+        return
+    ffmpeg_path = utils.full_path(FFMPEG_NAME)
+    if not os.path.isfile(ffmpeg_path):
+        ffmpeg_path = "ffmpeg"
 
+    record_play(sound_filename)
     voice_client.play(discord.FFmpegPCMAudio(
-        executable=utils.full_path(FFMPEG_NAME),
-        source=utils.full_path(SOUNDS_DIR_NAME, sound_file)
+        executable=ffmpeg_path,
+        source=sound_path,
     ))
-    logger.playing(sound_file)
-    record_play(sound_file)
+    logger.playing(sound_filename)
 
-# ── Audio normalization ───────────────────────────────────────────────────────
+intents = discord.Intents.default()
+intents.voice_states    = True
+intents.message_content = True
 
-async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> tuple[bool, str]:
-    import tempfile
+bot = commands.Bot(command_prefix=">", intents=intents, help_command=None)
 
-    tmp_fd, tmp_path = tempfile.mkstemp(
-        suffix=".mp3",
-        dir=os.path.dirname(file_path)
-    )
-    os.close(tmp_fd)
-
+def is_rl_running():
     try:
-        proc = await asyncio.create_subprocess_exec(
-            utils.full_path(FFMPEG_NAME),
-            "-y",
-            "-i", file_path,
-            "-af", f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11",
-            "-c:a", "libmp3lame",
-            "-q:a", "2",
-            tmp_path,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr_bytes = await proc.communicate()
-
-        if proc.returncode != 0:
-            stderr_text = stderr_bytes.decode(errors="replace").strip().splitlines()
-            detail = " | ".join(stderr_text[-3:]) if stderr_text else "unknown error"
-            return False, f"ffmpeg error: {detail}"
-
-        os.replace(tmp_path, file_path)
-        return True, "OK"
-
-    except Exception as exc:
-        return False, str(exc)
-    finally:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-
-# ── Upload security ──────────────────────────────────────────────────────────
-import re as _re
-
-ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".m4a"}
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024   # 50 MB
-_SAFE_NAME = _re.compile(r'^[\w\s\-()\[\].]+$')  # letters, digits, spaces, - _ ( ) [ ] .
-
-# ── Commands ──────────────────────────────────────────────────────────────────
-
-@bot.command(name='upload', help='Upload a new audio file. Allowed: .mp3 .wav .ogg .flac .m4a (max 50 MB).')
-async def upload(ctx, name: str = None):
-    if not ctx.message.attachments:
-        await ctx.send("Please attach a sound file.")
-        return
-
-    attachment = ctx.message.attachments[0]
-
-    # Resolve filename and extension
-    _, attach_ext = os.path.splitext(attachment.filename.lower())
-    if not name:
-        name = attachment.filename
-    else:
-        _, name_ext = os.path.splitext(name)
-        if not name_ext:
-            name = name + attach_ext
-
-    # 1. Block path traversal ─────────────────────────────────────────────────
-    safe_name = os.path.basename(name)
-    if safe_name != name or ".." in name or "/" in name or "\\" in name:
-        await ctx.send("❌ Invalid filename.")
-        logger.warn(f"Upload blocked (path traversal): {name!r} by {ctx.author}")
-        return
-
-    # 2. Safe character set ───────────────────────────────────────────────────
-    if not _SAFE_NAME.match(safe_name):
-        await ctx.send("❌ Filename contains invalid characters. Use letters, numbers, spaces, `-` and `_` only.")
-        logger.warn(f"Upload blocked (bad chars): {safe_name!r} by {ctx.author}")
-        return
-
-    # 3. Extension whitelist ──────────────────────────────────────────────────
-    _, ext = os.path.splitext(safe_name)
-    if ext.lower() not in ALLOWED_AUDIO_EXTENSIONS:
-        allowed = ", ".join(sorted(ALLOWED_AUDIO_EXTENSIONS))
-        await ctx.send(f"❌ `{ext}` is not an allowed audio format. Accepted: {allowed}")
-        logger.warn(f"Upload blocked (bad extension {ext!r}): {safe_name} by {ctx.author}")
-        return
-
-    # 4. Content-type check removed because Discord MIME types can be unreliable
-
-    # 5. Size cap ─────────────────────────────────────────────────────────────
-    if attachment.size > MAX_UPLOAD_BYTES:
-        mb = attachment.size / 1024 / 1024
-        await ctx.send(f"❌ File too large ({mb:.1f} MB). Maximum is {MAX_UPLOAD_BYTES // 1024 // 1024} MB.")
-        logger.warn(f"Upload blocked (too large {mb:.1f} MB): {safe_name} by {ctx.author}")
-        return
-
-    # 6. Name collision ───────────────────────────────────────────────────────
-    file_path = utils.full_path(SOUNDS_DIR_NAME, safe_name)
-    if os.path.isfile(file_path):
-        await ctx.send(f"A file named `{safe_name}` already exists.")
-        return
-
-    # 7. Download & save (Asynchronously) ─────────────────────────────────────
-    file_bytes = await attachment.read()
-    with open(file_path, "wb") as f:
-        f.write(file_bytes)
-
-    # 8. Normalize ────────────────────────────────────────────────────────────
-    status_msg = await ctx.send(f"⏳ Normalizing `{safe_name}` to {TARGET_LUFS} LUFS…")
-    logger.info(f"Normalizing upload: {safe_name} (from {ctx.author})")
-    ok, msg = await normalize_audio(file_path)
-
-    # Reload all sounds from disk to ensure memory matches disk and IDs are sorted
-    load_sounds()
-    new_sound_id = next((sid for sid, name in sounds.items() if name == safe_name), None)
-    if new_sound_id is None:
-        new_sound_id = next(filterfalse(set(sounds.keys()).__contains__, count(1)))
-        sounds[new_sound_id] = safe_name
-
-    if ok:
-        logger.success(f"Uploaded + normalized: {safe_name} (ID {new_sound_id}) by {ctx.author}")
-        await status_msg.edit(content=(
-            f"✅ Uploaded and normalized `{safe_name}` → ID **{new_sound_id}** "
-            f"(volume matched to {TARGET_LUFS} LUFS)"
-        ))
-    else:
-        logger.warn(f"Uploaded {safe_name} (normalization failed): {msg}")
-        await status_msg.edit(content=(
-            f"⚠️ Uploaded `{safe_name}` → ID **{new_sound_id}** "
-            f"(normalization failed: {msg})"
-        ))
-
-
-@bot.command(name='normalize', help=f'Normalize all sounds in the folder to {TARGET_LUFS} LUFS.')
-@owner_only()
-async def normalize_cmd(ctx):
-    if not sounds:
-        await ctx.send("No sounds loaded. Use `>refresh` first.")
-        return
-
-    status_msg = await ctx.send(f"⏳ Normalizing **{len(sounds)}** sounds to {TARGET_LUFS} LUFS…")
-    logger.divider("NORMALIZE")
-    logger.info(f"Normalizing {len(sounds)} sounds to {TARGET_LUFS} LUFS…")
-
-    ok_list   = []
-    fail_list = []
-
-    for sound_id in sorted(sounds.keys()):
-        filename  = sounds[sound_id]
-        file_path = utils.full_path(SOUNDS_DIR_NAME, filename)
-
-        if not os.path.isfile(file_path):
-            logger.warn(f"File not found on disk: {filename}")
-            fail_list.append(f"`{filename}` — file not found on disk")
-            continue
-
-        ok, msg = await normalize_audio(file_path)
-        if ok:
-            logger.success(f"Normalized: {filename}")
-            ok_list.append(filename)
-        else:
-            logger.error(f"Failed: {filename} — {msg}")
-            fail_list.append(f"`{filename}` — {msg}")
-
-    logger.divider()
-
-    embed = discord.Embed(
-        title="🎚️ Normalization Complete",
-        color=discord.Color.green() if not fail_list else discord.Color.orange(),
-    )
-    embed.add_field(
-        name=f"✅ Normalized ({len(ok_list)})",
-        value="\n".join(f"• {f}" for f in ok_list) or "None",
-        inline=False,
-    )
-    if fail_list:
-        embed.add_field(
-            name=f"❌ Failed ({len(fail_list)})",
-            value="\n".join(f"• {f}" for f in fail_list),
-            inline=False,
-        )
-    embed.set_footer(text=f"Target: {TARGET_LUFS} LUFS  •  TP=-1.5  •  LRA=11")
-
-    await status_msg.delete()
-    await ctx.send(embed=embed)
-
-
-@bot.command(name='refresh', help='Reloads all sounds from the folder')
-async def refresh_sounds(ctx):
-    load_sounds()
-    await ctx.send(f"🔄 Reloaded **{len(sounds)}** sounds from disk.")
-
-
-@bot.command(name='delete', help='Delete a sound by its ID')
-@owner_only()
-async def delete_sound(ctx, sound_id):
-    try:
-        sound_id = int(sound_id)
-    except ValueError:
-        await ctx.send(f"`{sound_id}` is not a valid ID.")
-        return
-
-    if sound_id not in sounds:
-        await ctx.send(f"No sound with ID `{sound_id}` exists.")
-        return
-
-    sound_name = sounds[sound_id]
-    os.remove(utils.full_path(SOUNDS_DIR_NAME, sound_name))
-    sounds.pop(sound_id)
-    logger.info(f"Deleted sound {sound_id}: {sound_name}")
-    await ctx.send(f"🗑️ Deleted sound **{sound_id}** (`{sound_name}`)")
-
-
-@bot.command(name="list", help="List all sounds currently loaded")
-async def list_sounds(ctx):
-    if not sounds:
-        await ctx.send("No sounds loaded.")
-        return
-
-    lines = [f"`{sid}` — {sounds[sid]}" for sid in sorted(sounds.keys())]
-    chunk = ""
-    for line in lines:
-        if len(chunk) + len(line) + 1 > 1900:
-            await ctx.send(chunk)
-            chunk = ""
-        chunk += line + "\n"
-    if chunk:
-        await ctx.send(chunk)
-
-
-@bot.command(name="play", help="Play a sound. Optional: provide an ID from >list to play a specific one.")
-async def play(ctx, sound_id: int = None):
-    voice_client = ctx.message.guild.voice_client
-    if not voice_client or not voice_client.is_connected():
-        await ctx.send("❌ The bot is not connected to a voice channel. Use `>join` first.")
-        return
-    if voice_client.is_playing():
-        await ctx.send("⏯️ Already playing a sound.")
-        return
-
-    if sound_id is not None:
-        if sound_id not in sounds:
-            await ctx.send(f"❌ No sound with ID `{sound_id}`. Use `>list` to see available sounds.")
-            return
-        play_sound(voice_client, sounds[sound_id])
-    else:
-        play_sound(voice_client, random_sound())
-
-
-@bot.command(name='join', help='Join your current voice channel and start goal detection')
-async def join(ctx):
-    voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-
-    if not ctx.message.author.voice:
-        await ctx.send(f"❌ {ctx.message.author.name} is not in a voice channel.")
-        return
-
-    if voice:
-        await ctx.send("✅ Already connected to a voice channel.")
-        return
-
-    channel = ctx.message.author.voice.channel
-    try:
-        await channel.connect(reconnect=False)
-    except TimeoutError:
-        await ctx.send("❌ Timed out connecting to voice. Try again in a moment.")
-        return
+        cmd = 'tasklist /FI "IMAGENAME eq RocketLeague.exe" /FO CSV /NH'
+        out = os.popen(cmd).read()
+        return "RocketLeague.exe" in out
     except Exception as e:
-        await ctx.send(f"❌ Failed to connect to voice: {e}")
-        return
+        logger.error(f"Error checking RL process: {e}")
+        return False
 
-    logger.success(f"Joined voice channel: {channel.name}")
+def owner_only():
+    async def predicate(ctx):
+        if not OWNER_ID:
+            await ctx.send("❌ `OWNER_ID` not set in `.env`. Owner commands disabled.")
+            return False
+        if ctx.author.id != OWNER_ID:
+            await ctx.send("❌ Permission denied. Owner-only command.")
+            return False
+        return True
+    return commands.check(predicate)
 
-    bot._manual_leave = False
-    if not check_goal.is_running():
-        check_goal.start(ctx.guild)
-        logger.info("Goal detection loop started.")
+# ── Prefix Commands ───────────────────────────────────────────────────────────
 
-    await ctx.send(f"✅ Joined **{channel.name}** and started goal detection.")
-
-
-@bot.command(name='leave', help='Leave the voice channel and stop goal detection')
-async def leave(ctx):
-    bot._manual_leave = True
-    voice_client = ctx.message.guild.voice_client
-    if voice_client and voice_client.is_connected():
-        if check_goal.is_running():
-            check_goal.stop()
-            logger.info("Goal detection loop stopped.")
-        await voice_client.disconnect()
-        logger.info("Left voice channel.")
-        await ctx.send("👋 Left the voice channel.")
-    else:
-        await ctx.send("❌ Not connected to a voice channel.")
-
-
-@bot.command(name='restart', help='Restart the bot (auto-relaunches via watcher)')
-@owner_only()
-async def restart(ctx):
-    await ctx.send("🔄 Restarting…")
-    logger.warn("Restart requested by user.")
-    try:
-        if check_goal.is_running():
-            check_goal.stop()
-        voice_client = ctx.message.guild.voice_client
-        if voice_client and voice_client.is_connected():
-            await asyncio.wait_for(voice_client.disconnect(), timeout=2.0)
-        await asyncio.wait_for(bot.close(), timeout=2.0)
-    except Exception as e:
-        logger.error(f"Error during graceful restart shutdown: {e}")
-    finally:
-        os._exit(0)
-
-
-@bot.command(name="commands", aliases=["cmds", "help"], help="Show all available bot commands")
-async def commands_list(ctx):
+@bot.command(name="help", help="Show all available commands")
+async def help_cmd(ctx):
     embed = discord.Embed(
         title="🎮 RLScoreBot — Commands",
-        description=f"Prefix: `>` — e.g. `>join`",
+        description="Auto goal celebration bot for Rocket League",
         color=discord.Color.from_str("#5865F2"),
     )
     embed.add_field(
-        name="🔊 Voice & Detection",
-        value=(
-            "`>join` — Join your voice channel and start goal detection\n"
-            "`>leave` — Leave the voice channel and stop detection\n"
-            "`>play [id]` — Play a random sound or specify a sound by ID\n"
-            "🔒 `>restart` — Restart the bot (owner only)"
-        ),
+        name=">join",
+        value="Join your current voice channel & start goal detection",
         inline=False,
     )
     embed.add_field(
-        name="🎵 Sound Management",
-        value=(
-            "`>list` — List all loaded sounds with their IDs\n"
-            "`>upload <name>` — Upload a new sound (attach audio) — auto-normalizes\n"
-            "🔒 `>delete <id>` — Delete a sound by its ID (owner only)\n"
-            "`>refresh` — Reload sounds from disk\n"
-            f"🔒 `>normalize` — Normalize all sounds to {TARGET_LUFS} LUFS (owner only)"
-        ),
+        name=">leave",
+        value="Leave the voice channel & stop goal detection",
         inline=False,
     )
     embed.add_field(
-        name="🛠️ Utilities",
-        value=(
-            "`>commands` / `>cmds` / `>help` — Show this command list\n"
-            "`>stats` — Goals scored, sounds played, top 10 leaderboard\n"
-            "🔒 `>status_sync` — Sync custom status to Gemini generation (owner only)\n"
-            "🔒 `>test` — Run a full self-test and show pass/fail report (owner only)"
-        ),
+        name=">play [sound]",
+        value="Play a specific sound or a random sound if no name given",
         inline=False,
     )
-    embed.set_footer(text=f"Sounds loaded: {len(sounds)}  •  Volume: {TARGET_LUFS} LUFS  •  🔒 = Owner Only")
+    embed.add_field(
+        name=">list",
+        value="List all available sound files in the library",
+        inline=False,
+    )
+    embed.add_field(
+        name=">stats",
+        value="Show goal counts & play statistics",
+        inline=False,
+    )
+    embed.add_field(
+        name=">upload [sound_name]",
+        value="Upload an MP3 sound file to the sound library",
+        inline=False,
+    )
+    embed.add_field(
+        name=">refresh",
+        value="[Owner] Reload sounds from disk without restarting",
+        inline=False,
+    )
+    embed.add_field(
+        name=">status_sync",
+        value="[Owner] Manually trigger custom status sync from chat history",
+        inline=False,
+    )
+    embed.add_field(
+        name=">test",
+        value="[Owner] Run diagnostic self-test",
+        inline=False,
+    )
+    embed.set_footer(text="Prefix: >  |  RLScoreBot v2.0")
     await ctx.send(embed=embed)
 
 
-@bot.command(name="test", help="Run a self-test of all bot systems")
+@bot.command(name="join", help="Join your voice channel and start score detection")
+async def join_cmd(ctx):
+    bot._manual_leave = False
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        await ctx.send("❌ You need to be in a voice channel first!")
+        return
+
+    channel = ctx.author.voice.channel
+    voice_client = ctx.guild.voice_client
+
+    if voice_client and voice_client.is_connected():
+        await voice_client.move_to(channel)
+        logger.info(f"Moved to voice channel: {channel.name}")
+    else:
+        await channel.connect()
+        logger.info(f"Joined voice channel: {channel.name}")
+
+    if not check_goal.is_running():
+        check_goal.start(ctx.guild)
+        logger.info("Goal detection loop started manually.")
+
+    await ctx.send(f"✅ Joined **{channel.name}**! Score detection active.")
+
+
+@bot.command(name="leave", help="Leave the voice channel and stop score detection")
+async def leave_cmd(ctx):
+    bot._manual_leave = True
+    voice_client = ctx.guild.voice_client
+
+    if check_goal.is_running():
+        check_goal.stop()
+        logger.info("Goal detection loop stopped.")
+
+    if voice_client and voice_client.is_connected():
+        await voice_client.disconnect()
+        logger.info("Disconnected from voice channel.")
+        await ctx.send("👋 Disconnected from voice channel.")
+    else:
+        await ctx.send("⚠️ I'm not in a voice channel.")
+
+
+@bot.command(name="play", help="Play a sound by name or random if omitted")
+async def play_cmd(ctx, *, sound_name: str = None):
+    voice_client = ctx.guild.voice_client
+    if not voice_client or not voice_client.is_connected():
+        await ctx.send("❌ I'm not in a voice channel! Use `>join` first.")
+        return
+
+    if sound_name is None:
+        chosen = random_sound()
+        if not chosen:
+            await ctx.send("❌ Sound library is empty.")
+            return
+        play_sound(voice_client, chosen)
+        await ctx.send(f"🎵 Playing random sound: **`{chosen}`**")
+        return
+
+    norm = normalize_name(sound_name)
+    if norm in sounds:
+        play_sound(voice_client, sounds[norm])
+        await ctx.send(f"🎵 Playing: **`{sounds[norm]}`**")
+    else:
+        matched_file = None
+        for key, val in sounds.items():
+            if norm in key:
+                matched_file = val
+                break
+
+        if matched_file:
+            play_sound(voice_client, matched_file)
+            await ctx.send(f"🎵 Playing closest match: **`{matched_file}`**")
+        else:
+            await ctx.send(f"❌ Sound `'{sound_name}'` not found. Use `>list` to see available sounds.")
+
+
+@bot.command(name="list", help="List all available sound files")
+async def list_cmd(ctx):
+    if not sounds:
+        await ctx.send("❌ Sound library is empty.")
+        return
+
+    sound_names = sorted(sounds.values())
+    list_str = "\n".join(f"`{i+1}.` {os.path.splitext(s)[0]}" for i, s in enumerate(sound_names))
+
+    if len(list_str) > 1900:
+        pages = []
+        current = ""
+        for line in list_str.split("\n"):
+            if len(current) + len(line) + 1 > 1900:
+                pages.append(current)
+                current = line
+            else:
+                current += f"\n{line}" if current else line
+        if current:
+            pages.append(current)
+
+        for idx, page in enumerate(pages):
+            embed = discord.Embed(
+                title=f"🎵 Sound Library ({idx+1}/{len(pages)})",
+                description=page,
+                color=discord.Color.from_str("#5865F2"),
+            )
+            await ctx.send(embed=embed)
+    else:
+        embed = discord.Embed(
+            title=f"🎵 Sound Library ({len(sounds)} sounds)",
+            description=list_str,
+            color=discord.Color.from_str("#5865F2"),
+        )
+        await ctx.send(embed=embed)
+
+
+@bot.command(name="upload", help="Upload a new sound file (.mp3)")
+async def upload_cmd(ctx, *, custom_name: str = None):
+    if not ctx.message.attachments:
+        await ctx.send("❌ Please attach an `.mp3` file to your message!")
+        return
+
+    attachment = ctx.message.attachments[0]
+    filename = attachment.filename
+
+    if not filename.lower().endswith(".mp3"):
+        await ctx.send("❌ Only `.mp3` files are supported!")
+        return
+
+    if custom_name:
+        safe_name = re.sub(r'[\s_\-]+', '_', custom_name.strip()).lower()
+        if not safe_name.endswith(".mp3"):
+            safe_name += ".mp3"
+        save_filename = safe_name
+    else:
+        save_filename = filename
+
+    sounds_dir = utils.full_path(SOUNDS_DIR_NAME)
+    if not os.path.exists(sounds_dir):
+        os.makedirs(sounds_dir, exist_ok=True)
+
+    dest_path = os.path.join(sounds_dir, save_filename)
+    await attachment.save(dest_path)
+
+    global sounds
+    sounds = scan_sounds()
+
+    logger.success(f"Sound uploaded and saved to: {dest_path}")
+
+    embed = discord.Embed(
+        title="✅ Sound Uploaded!",
+        description=f"Saved as: **`{save_filename}`**\nTotal sounds: **{len(sounds)}**",
+        color=discord.Color.green(),
+    )
+    embed.add_field(name="How to play it", value=f"`>play {os.path.splitext(save_filename)[0]}`", inline=False)
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="refresh", help="Reload sound files from disk")
+@owner_only()
+async def refresh_cmd(ctx):
+    global sounds
+    sounds = scan_sounds()
+    logger.success(f"Sound library refreshed: {len(sounds)} sounds loaded")
+    await ctx.send(f"✅ Sound library reloaded! **{len(sounds)}** sounds active.")
+
+
+@bot.command(name="test", help="Run diagnostic self-test")
 @owner_only()
 async def test_cmd(ctx):
-    status_msg = await ctx.send("🔬 Running self-test…")
-    logger.divider("TEST")
+    logger.divider()
+    logger.info("Running self-test diagnostics...")
 
+    status_msg = await ctx.send("🔬 Running self-test diagnostics...")
     results = []
 
     if sounds:
-        logger.success(f"Sounds loaded: {len(sounds)}")
         results.append(("✅", "Sounds loaded", f"{len(sounds)} sounds in memory"))
     else:
         logger.warn("No sounds loaded")
@@ -554,7 +406,6 @@ async def test_cmd(ctx):
         logger.error("DISCORD_TOKEN not set")
         results.append(("❌", "Discord token", "DISCORD_TOKEN not set in .env"))
 
-    # Stats file check
     stats_path = utils.full_path("stats.json")
     if os.path.isfile(stats_path):
         try:
@@ -568,7 +419,6 @@ async def test_cmd(ctx):
     else:
         results.append(("⚠️", "Stats file (stats.json)", "Not found (will be created automatically)"))
 
-    # Owner ID check
     if OWNER_ID:
         results.append(("✅", "Owner ID configuration", f"Configured ID: `{OWNER_ID}`"))
     else:
@@ -610,7 +460,7 @@ async def test_cmd(ctx):
     await ctx.send(embed=embed)
 
 
-# ── Goal detection loop ───────────────────────────────────────────────────────
+# ── Goal Detection Loop ───────────────────────────────────────────────────────
 
 prev_img = None
 img = None
@@ -618,7 +468,7 @@ consecutive_frames  = 0
 last_detected_idx   = -1
 current_game_score  = -1
 
-@tasks.loop(seconds=0.2)
+@tasks.loop(seconds=0.1)
 async def check_goal(guild):
     global prev_img, img, consecutive_frames, last_detected_idx, current_game_score
 
@@ -627,16 +477,26 @@ async def check_goal(guild):
         return
 
     try:
-        img = score_detector.get_score_img()
-    except RuntimeError:
-        return
+        raw_screen = ImageGrab.grab()
+        screen_np   = np.array(raw_screen)
+        screen_bgr  = cv2.cvtColor(screen_np, cv2.COLOR_RGB2BGR)
 
-    if not prev_img:
-        prev_img = img
+        h, w = screen_bgr.shape[:2]
+        crop_h = int(h * 0.15)
+        crop_w = int(w * 0.30)
+        start_x = int((w - crop_w) / 2)
 
-    try:
-        if score_detector.compare_images(img, prev_img) < score_detector.DIFFERENCE_SIMILARITY_THRESHOLD:
-            best_match     = 0
+        cropped = screen_bgr[0:crop_h, start_x:start_x + crop_w]
+        img = score_detector.process_image(cropped)
+
+        if prev_img is None:
+            prev_img = img
+            return
+
+        diff_score = score_detector.calculate_image_difference(img, prev_img)
+
+        if diff_score > 0.05:
+            best_match = -1.0
             best_match_idx = -1
 
             for i, saved_img in enumerate(score_detector.SAVED_IMAGES):
@@ -653,14 +513,12 @@ async def check_goal(guild):
                     last_detected_idx  = best_match_idx
 
                 if consecutive_frames >= 3:
-                    # Case 1: Initialization
                     if current_game_score == -1:
                         current_game_score = best_match_idx
                         logger.detection("Initialized", f"score = {current_game_score}")
                         prev_img = img
                         return
 
-                    # Case 2: Game Reset
                     if best_match_idx == 0:
                         if current_game_score != 0:
                             logger.detection("Game reset", "score → 0")
@@ -668,7 +526,6 @@ async def check_goal(guild):
                         prev_img = img
                         return
 
-                    # Case 3: Goal Scored
                     if best_match_idx == current_game_score + 1:
                         logger.goal(current_game_score, best_match_idx)
                         current_game_score = best_match_idx
@@ -678,12 +535,10 @@ async def check_goal(guild):
                         prev_img = img
                         return
 
-                    # Case 4: Same Score
                     if best_match_idx == current_game_score:
                         prev_img = img
                         return
 
-                    # Case 5: Illogical jump (noise)
                     consecutive_frames = 0
                     prev_img = img
             else:
@@ -701,7 +556,6 @@ async def stats_cmd(ctx):
     m, s   = divmod(rem, 60)
     uptime_str = f"{h}h {m}m {s}s" if h else f"{m}m {s}s"
 
-    # Top 10 most played (all-time)
     top = sorted(_stats["play_counts"].items(), key=lambda x: x[1], reverse=True)[:10]
 
     embed = discord.Embed(
@@ -742,7 +596,6 @@ async def stats_cmd(ctx):
 # ── Gemini Status Sync ─────────────────────────────────────────────────────────
 
 async def fetch_random_chat_history(guild):
-    """Finds a text channel named 'general' in the guild, picks a random day, and returns up to 50 messages formatted as a chat log."""
     general_channel = None
     for channel in guild.text_channels:
         if channel.name.lower() == "general":
@@ -754,7 +607,7 @@ async def fetch_random_chat_history(guild):
         return None
 
     try:
-        start_date = general_channel.created_at # UTC timezone-aware
+        start_date = general_channel.created_at
         now = _dt.now(timezone.utc)
         
         delta = now - start_date
@@ -766,19 +619,16 @@ async def fetch_random_chat_history(guild):
         random_time = start_date + timedelta(seconds=random_seconds)
 
         messages = []
-        # Fetch up to 50 messages starting after the random time
         async for msg in general_channel.history(limit=50, after=random_time):
             if msg.author.bot or not msg.content.strip():
                 continue
             messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
             
         if not messages:
-            # Fallback: just fetch the latest 50 messages if the random date was empty
             async for msg in general_channel.history(limit=50):
                 if msg.author.bot or not msg.content.strip():
                     continue
                 messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
-            # Reverse fallback messages to restore chronological order (newest to oldest by default)
             messages.reverse()
                 
         return "\n".join(messages)
@@ -788,7 +638,6 @@ async def fetch_random_chat_history(guild):
 
 
 async def generate_status_from_chat(chat_text: str, api_key: str) -> str:
-    """Sends chat text to the Gemini API and generates a funny custom status."""
     if not api_key:
         logger.warn("Gemini API key is missing. Cannot generate status.")
         return None
@@ -816,42 +665,34 @@ async def generate_status_from_chat(chat_text: str, api_key: str) -> str:
             async with session.post(url, json=payload, timeout=30) as response:
                 if response.status == 200:
                     data = await response.json()
-                    
                     candidates = data.get('candidates', [])
                     if not candidates:
-                        logger.warn("Gemini returned no status candidates (possibly filtered).")
+                        logger.warn("Gemini returned no status candidates.")
                         return None
                         
                     candidate = candidates[0]
-                    finish_reason = candidate.get('finishReason')
-                    if finish_reason == 'SAFETY':
-                        logger.warn("Gemini blocked status generation due to safety settings (flagged content).")
-                        return None
-                        
                     content = candidate.get('content')
                     if not content or not content.get('parts'):
-                        logger.warn(f"Gemini response structure is missing content/parts. Finish reason: {finish_reason}")
                         return None
                         
                     status_text = content['parts'][0]['text'].strip()
-                    if (status_text.startswith('"') and status_text.endswith('"')) or (status_text.startswith("'") and status_text.endswith("'")):
-                        status_text = status_text[1:-1].strip()
-                    return status_text[:120]  # truncate to safe limit
+                    lines = [l.strip().lstrip('*').lstrip('>').strip() for l in status_text.splitlines() if l.strip()]
+                    clean_text = lines[0] if lines else status_text
+                    if (clean_text.startswith('"') and clean_text.endswith('"')) or (clean_text.startswith("'") and clean_text.endswith("'")):
+                        clean_text = clean_text[1:-1].strip()
+                    return clean_text[:120]
                 else:
-                    err_body = await response.text()
-                    logger.error(f"Gemini API returned status {response.status}: {err_body}")
+                    err = await response.text()
+                    logger.error(f"Gemini API returned status {response.status}: {err[:150]}")
                     return None
     except Exception as e:
-        import traceback
-        tb_str = "".join(traceback.format_exception(type(e), e, e.__traceback__))
-        logger.error(f"Failed to generate status from Gemini ({type(e).__name__}):\n{tb_str}")
+        logger.error(f"Error calling Gemini API: {e}")
         return None
 
 
-async def update_bot_status(guild) -> str:
-    """Orchestrates fetching history, calling Gemini, and setting the bot's custom status."""
+async def update_bot_status(guild):
     if not GEMINI_API_KEY:
-        logger.warn("GEMINI_API_KEY not configured in environment. Custom status sync skipped.")
+        logger.warn("GEMINI_API_KEY not found in .env. Custom status disabled.")
         return None
 
     logger.info("Syncing custom status with random chat history...")
@@ -889,9 +730,12 @@ async def monitor_game_status():
             logger.warn("Rocket League is not running. Shutting down bot gracefully...")
             voice_client = discord.utils.get(bot.voice_clients)
             if voice_client and voice_client.is_connected():
-                await voice_client.disconnect()
+                try:
+                    await voice_client.disconnect(force=True)
+                except Exception:
+                    pass
+            await asyncio.sleep(0.5)
             await bot.close()
-            os._exit(2)
     else:
         monitor_game_status._seen_running = True
         
@@ -902,8 +746,6 @@ async def monitor_game_status():
                     if owner and owner.voice and owner.voice.channel:
                         monitor_game_status._is_connecting = True
                         try:
-                            # Using asyncio.create_task to not block the loop, but since connect() blocks, 
-                            # we can just await it directly as the loop handles it
                             await owner.voice.channel.connect(reconnect=False)
                             logger.success(f"Auto-joined voice channel: {owner.voice.channel.name}")
                             if not check_goal.is_running():
@@ -915,87 +757,50 @@ async def monitor_game_status():
                             monitor_game_status._is_connecting = False
                         break
 
+@bot.event
+async def on_voice_state_update(member, before, after):
+    """Auto-disconnect from voice channel if no human members remain."""
+    for vc in bot.voice_clients:
+        if vc.channel:
+            human_members = [m for m in vc.channel.members if not m.bot]
+            if len(human_members) == 0:
+                logger.info(f"Voice channel #{vc.channel.name} is empty. Disconnecting...")
+                try:
+                    await vc.disconnect()
+                except Exception as e:
+                    logger.error(f"Disconnect error: {e}")
+
 
 @bot.command(name="status_sync", help="Manually trigger an LLM-generated status update from random general chat history")
 @owner_only()
 async def status_sync_cmd(ctx):
-    status_msg = await ctx.send("⏳ Fetching chat history and generating custom status...")
+    await ctx.send("⏳ Sampling random historical chat history and calling Gemini AI...")
     status_text = await update_bot_status(ctx.guild)
     if status_text:
-        await status_msg.edit(content=f"✅ Custom status updated to: \"{status_text}\"")
+        await ctx.send(f"✅ Status updated to: \"{status_text}\"")
     else:
-        await status_msg.edit(content="❌ Failed to update custom status. Check console logs for details.")
+        await ctx.send("❌ Failed to update status. Check bot console logs for details.")
 
-
-# ── Events ────────────────────────────────────────────────────────────────────
 
 @bot.event
 async def on_ready():
     logger.success(f"Connected to Discord as {bot.user}")
-    logger.divider("READY")
+    logger.divider()
+
     if not auto_status_loop.is_running():
         auto_status_loop.start()
         logger.info("Custom status auto-update loop started.")
+
     if not monitor_game_status.is_running():
         monitor_game_status.start()
         logger.info("Game status monitor loop started.")
 
-
-@bot.event
-async def on_message(message):
-    await bot.process_commands(message)
-
-
-# ── Entry point ───────────────────────────────────────────────────────────────
-
 async def main():
+    if not DISCORD_TOKEN:
+        logger.error("DISCORD_TOKEN is missing! Please set it in your .env file.")
+        return
     async with bot:
         await bot.start(DISCORD_TOKEN)
 
 if __name__ == "__main__":
-    import traceback as _tb
-
-    CRASH_LOG = utils.full_path("crash.log")
-
-    def write_crash(exc: BaseException):
-        """Append a crash report to crash.log."""
-        timestamp = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
-        sep = "=" * 60
-        report = (
-            f"\n{sep}\n"
-            f"CRASH  {timestamp}\n"
-            f"{sep}\n"
-            f"Exception : {type(exc).__name__}: {exc}\n"
-            f"Uptime    : {_dt.now() - _bot_start_time}\n"
-            f"Sounds    : {len(sounds)} loaded\n"
-            f"Session goals : {_session_goals}\n"
-            f"\nTraceback:\n"
-            f"{_tb.format_exc()}\n"
-            f"{sep}\n"
-        )
-        try:
-            with open(CRASH_LOG, "a", encoding="utf-8") as f:
-                f.write(report)
-            logger.error(f"Crash written to crash.log")
-        except Exception:
-            pass
-
-    logger.banner()
-    load_sounds()
-    load_stats()
-
-    if not DISCORD_TOKEN:
-        logger.error("DISCORD_TOKEN not found. Create a .env file with your token.")
-    elif not os.path.exists(utils.full_path(FFMPEG_NAME)):
-        logger.error(f"{FFMPEG_NAME} not found. Place ffmpeg.exe in the project folder.")
-    else:
-        logger.info("Starting bot…")
-        try:
-            asyncio.run(main())
-        except KeyboardInterrupt:
-            logger.warn("Bot stopped by user.")
-        except Exception as e:
-            logger.error(f"Fatal crash: {type(e).__name__}: {e}")
-            write_crash(e)
-            logger.warn("Window closing in 10 seconds — check crash.log for details")
-            import time as _time; _time.sleep(10)
+    asyncio.run(main())
