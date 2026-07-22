@@ -146,12 +146,13 @@ def add_guild_sound(discord_user_id: str, guild_id: str, filename: str, display_
         conn.commit()
 
 def get_guild_sounds(guild_id: str) -> List[Dict[str, Any]]:
-    """Retrieve all sounds uploaded in this server OR legacy global sounds."""
+    """Retrieve all sounds uploaded in this server OR legacy global sounds strictly in chronological order of upload."""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT * FROM user_sounds 
             WHERE guild_id = ? OR guild_id IS NULL OR guild_id = '' OR guild_id = 'system_guild'
+            ORDER BY id ASC
         """, (str(guild_id),))
         return [dict(row) for row in cursor.fetchall()]
 

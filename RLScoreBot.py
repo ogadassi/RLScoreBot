@@ -76,31 +76,32 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
             except OSError:
                 pass
 
-# ── Soundboard Manager (100% User & Server Scoped, No Artificial Defaults) ──
+# ── Soundboard Manager (100% User & Server Scoped, Chronological Order) ──────
 def get_guild_sound_library(guild_id: str = None) -> list[str]:
     """
-    Returns server-specific uploaded sounds and physical disk sound files.
-    No hardcoded default sounds.
+    Returns server-specific uploaded sounds and physical disk sound files
+    in exact chronological order of upload.
     """
-    dir_path = utils.full_path(SOUNDS_DIR_NAME)
-    disk_files = []
-    if os.path.exists(dir_path):
-        disk_files = [f for f in os.listdir(dir_path) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
-
     db_filenames = []
     if guild_id:
         guild_records = database.get_guild_sounds(str(guild_id))
         db_filenames = [r["filename"] for r in guild_records if r.get("filename")]
 
+    dir_path = utils.full_path(SOUNDS_DIR_NAME)
+    disk_files = []
+    if os.path.exists(dir_path):
+        disk_files = [f for f in os.listdir(dir_path) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
+
+    # Combine while preserving insertion/upload order (no alphabetical sorting)
     combined = list(dict.fromkeys(db_filenames + disk_files))
-    return sorted(combined)
+    return combined
 
 def get_random_sound_for_guild(guild_id: str = None) -> str:
     sounds = get_guild_sound_library(guild_id)
     return random.choice(sounds) if sounds else None
 
 def build_soundboard_embed(sounds: list[str], title_label: str) -> discord.Embed:
-    """Builds a multi-column Discord Embed displaying the soundboard library."""
+    """Builds a single-column Discord Embed displaying all sounds in chronological upload order."""
     embed = discord.Embed(title=title_label, color=discord.Color.purple())
     
     if not sounds:
@@ -111,8 +112,8 @@ def build_soundboard_embed(sounds: list[str], title_label: str) -> discord.Embed
     for i in range(0, len(sounds), chunk_size):
         chunk = sounds[i:i + chunk_size]
         field_name = f"Sounds ({i+1}–{min(i+chunk_size, len(sounds))} of {len(sounds)})"
-        field_val = "\n".join([f"• `{s}`" for s in chunk])
-        embed.add_field(name=field_name, value=field_val, inline=True)
+        field_val = "\n".join([f"`{i + idx + 1}.` `{s}`" for idx, s in enumerate(chunk)])
+        embed.add_field(name=field_name, value=field_val, inline=False)  # Single column
 
     return embed
 
