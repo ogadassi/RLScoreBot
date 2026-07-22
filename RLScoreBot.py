@@ -76,8 +76,10 @@ async def fetch_random_chat_history(guild):
             general_channel = channel
             break
             
+    if not general_channel and guild.text_channels:
+        general_channel = guild.text_channels[0]
+
     if not general_channel:
-        logger.warn("Could not find 'general' channel to fetch status history.")
         return None
 
     try:
@@ -124,11 +126,15 @@ async def generate_status_from_chat(chat_log: str, api_key: str) -> str:
 
 async def update_bot_status(guild) -> str:
     if not GEMINI_API_KEY:
-        return None
+        activity = discord.CustomActivity(name="Watching Rocket League ⚽ | /join")
+        await bot.change_presence(activity=activity)
+        return "Watching Rocket League ⚽ | /join"
 
     chat_log = await fetch_random_chat_history(guild)
     if not chat_log:
-        return None
+        activity = discord.CustomActivity(name="Watching Rocket League ⚽ | /join")
+        await bot.change_presence(activity=activity)
+        return "Watching Rocket League ⚽ | /join"
 
     status_text = await generate_status_from_chat(chat_log, GEMINI_API_KEY)
     if status_text:
@@ -136,7 +142,10 @@ async def update_bot_status(guild) -> str:
         await bot.change_presence(activity=activity)
         logger.success(f"Custom status updated to: \"{status_text}\"")
         return status_text
-    return None
+
+    activity = discord.CustomActivity(name="Watching Rocket League ⚽ | /join")
+    await bot.change_presence(activity=activity)
+    return "Watching Rocket League ⚽ | /join"
 
 # ── Soundboard Manager ───────────────────────────────────────────────────────
 def get_available_sounds():
@@ -182,7 +191,6 @@ def play_sound_in_vc(voice_client, sound_filename: str):
 
 # ── Embedded Web Server & Webhooks ────────────────────────────────────────────
 async def handle_index(request):
-    """Serve website landing page."""
     index_path = os.path.join(os.path.dirname(__file__), WEBSITE_DIR_NAME, "index.html")
     if os.path.exists(index_path):
         return web.FileResponse(index_path)
@@ -337,14 +345,15 @@ async def cmd_upload(interaction: discord.Interaction, file: discord.Attachment,
 
 @bot.tree.command(name="list", description="List all available goal celebration sounds.")
 async def cmd_list(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
     sounds = get_available_sounds()
     embed = discord.Embed(
         title="🎧 Goal Celebration Soundboard",
         color=discord.Color.purple()
     )
-    sound_lines = "\n".join([f"• `{s}`" for s in sounds])
-    embed.add_field(name="Available Sounds", value=sound_lines or "No sounds loaded.", inline=False)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    sound_lines = "\n".join([f"• `{s}`" for s in sounds[:30]])
+    embed.add_field(name=f"Available Sounds ({len(sounds)})", value=sound_lines or "No sounds loaded.", inline=False)
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="play", description="Manually trigger a goal sound in the voice channel.")
 async def cmd_play(interaction: discord.Interaction, sound_name: str = None):
