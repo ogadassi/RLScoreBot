@@ -4,7 +4,6 @@ import random
 import re
 import json
 import time
-import sqlite3
 import aiohttp
 import functools
 import cv2
