@@ -70,7 +70,6 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
 
 # ── Gemini AI Status Generation ─────────────────────────────────────────────
 async def fetch_random_chat_history(guild):
-    """Finds a text channel named 'general' in the guild and returns sample messages."""
     general_channel = None
     for channel in guild.text_channels:
         if channel.name.lower() in ["general", "chat", "main"]:
@@ -96,7 +95,6 @@ async def fetch_random_chat_history(guild):
         return None
 
 async def generate_status_from_chat(chat_log: str, api_key: str) -> str:
-    """Uses Gemini API to synthesize a funny status from server chat history."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
     prompt = (
         "Below is a chat log from a Discord server's general chat. "
@@ -125,7 +123,6 @@ async def generate_status_from_chat(chat_log: str, api_key: str) -> str:
         return None
 
 async def update_bot_status(guild) -> str:
-    """Orchestrates status update using chat history and Gemini API."""
     if not GEMINI_API_KEY:
         return None
 
@@ -185,10 +182,11 @@ def play_sound_in_vc(voice_client, sound_filename: str):
 
 # ── Embedded Web Server & Webhooks ────────────────────────────────────────────
 async def handle_index(request):
-    index_path = utils.full_path(WEBSITE_DIR_NAME, "index.html")
+    """Serve website landing page."""
+    index_path = os.path.join(os.path.dirname(__file__), WEBSITE_DIR_NAME, "index.html")
     if os.path.exists(index_path):
         return web.FileResponse(index_path)
-    return web.Response(text="RLScoreBot Cloud Engine Online.")
+    return web.Response(text="<h1>RLScoreBot Cloud Engine Online</h1>", content_type="text/html")
 
 async def handle_goal_webhook(request):
     try:
@@ -245,15 +243,16 @@ def setup_web_routes(app):
     app.router.add_post("/api/v1/goal", handle_goal_webhook)
     app.router.add_get("/api/v1/stats", handle_stats_api)
     
-    website_path = utils.full_path(WEBSITE_DIR_NAME)
-    sounds_path = utils.full_path(SOUNDS_DIR_NAME)
-    
-    if os.path.exists(website_path):
-        app.router.add_static("/website", website_path)
-        app.router.add_static("/style.css", website_path)
-        app.router.add_static("/app.js", website_path)
-    if os.path.exists(sounds_path):
-        app.router.add_static("/sounds", sounds_path)
+    website_dir = os.path.join(os.path.dirname(__file__), WEBSITE_DIR_NAME)
+    sounds_dir = os.path.join(os.path.dirname(__file__), SOUNDS_DIR_NAME)
+
+    if os.path.exists(sounds_dir):
+        app.router.add_static("/sounds", sounds_dir)
+        
+    if os.path.exists(website_dir):
+        app.router.add_static("/style.css", website_dir)
+        app.router.add_static("/app.js", website_dir)
+        app.router.add_static("/logo.png", website_dir)
 
 # ── Discord Slash Commands ────────────────────────────────────────────────────
 
@@ -387,7 +386,6 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Failed to sync slash commands: {e}")
 
-    # Generate custom status immediately upon connection for all guilds
     for guild in bot.guilds:
         await update_bot_status(guild)
 
