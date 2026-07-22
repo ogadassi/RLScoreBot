@@ -76,59 +76,51 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
             except OSError:
                 pass
 
-# ── Soundboard Manager (Strict Disk & Database File Creation Time Ordering) ──
+# ── Soundboard Manager (100% Upload Order, Single Clean List) ─────────────────
 def get_guild_sound_library(guild_id: str = None) -> list[str]:
     """
-    Returns server-specific uploaded sounds sorted strictly by their file creation / modification 
-    timestamp on disk (os.path.getmtime) or database timestamp (oldest file first -> newest file last).
+    Returns server-specific uploaded sounds in exact order of upload (oldest upload -> newest upload).
+    No alphabetical sorting.
     """
-    sounds_dir = utils.full_path(SOUNDS_DIR_NAME)
-    file_timestamps = {}
-
-    # 1. Fetch DB records created_at timestamp
+    db_filenames = []
     if guild_id:
         guild_records = database.get_guild_sounds(str(guild_id))
-        for r in guild_records:
-            fname = r.get("filename")
-            if fname:
-                file_timestamps[fname] = r.get("created_at") or 0.0
+        db_filenames = [r["filename"] for r in guild_records if r.get("filename")]
 
-    # 2. Check actual file modification/creation time on disk using os.path.getmtime
+    sounds_dir = utils.full_path(SOUNDS_DIR_NAME)
+    disk_files = []
     if os.path.exists(sounds_dir):
-        for f in os.listdir(sounds_dir):
-            if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a')):
-                full_p = os.path.join(sounds_dir, f)
-                try:
-                    mtime = os.path.getmtime(full_p)
-                except OSError:
-                    mtime = 0.0
-                
-                # If disk file timestamp exists, use disk creation/mod time for accurate physical ordering
-                if f not in file_timestamps or file_timestamps[f] == 0.0 or mtime > 0:
-                    file_timestamps[f] = mtime
+        disk_files = [f for f in os.listdir(sounds_dir) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
 
-    # Sort all filenames strictly by timestamp ascending (oldest file to newest file)
-    sorted_filenames = sorted(file_timestamps.keys(), key=lambda fname: (file_timestamps[fname], fname))
-    return sorted_filenames
+    # Combine in exact order of DB upload ID / insertion (no alphabetical sorting)
+    combined = list(dict.fromkeys(db_filenames + disk_files))
+    return combined
 
 def get_random_sound_for_guild(guild_id: str = None) -> str:
     sounds = get_guild_sound_library(guild_id)
     return random.choice(sounds) if sounds else None
 
 def build_soundboard_embed(sounds: list[str], title_label: str) -> discord.Embed:
-    """Builds a single-column Discord Embed displaying all sounds in order of file creation time (oldest to newest)."""
+    """Builds a single unbroken Discord Embed list in upload order without field headers."""
     embed = discord.Embed(title=title_label, color=discord.Color.purple())
     
     if not sounds:
         embed.description = "No custom sounds uploaded yet. Use `/upload` or `>upload` to add your first goal celebration sound!"
         return embed
 
-    chunk_size = 20
-    for i in range(0, len(sounds), chunk_size):
-        chunk = sounds[i:i + chunk_size]
-        field_name = f"Sounds ({i+1}–{min(i+chunk_size, len(sounds))} of {len(sounds)})"
-        field_val = "\n".join([f"`{i + idx + 1}.` `{s}`" for idx, s in enumerate(chunk)])
-        embed.add_field(name=field_name, value=field_val, inline=False)  # Single column
+    lines = [f"`{idx + 1}.` `{s}`" for idx, s in enumerate(sounds)]
+    full_text = "\n".join(lines)
+
+    if len(full_text) <= 4000:
+        embed.description = full_text
+    else:
+        # If over 4,000 chars, use seamless fields with invisible headers (\u200b)
+        embed.description = lines[0]
+        chunk_size = 30
+        for i in range(1, len(sounds), chunk_size):
+            chunk = sounds[i:i + chunk_size]
+            field_val = "\n".join([f"`{i + idx + 1}.` `{s}`" for idx, s in enumerate(chunk)])
+            embed.add_field(name="\u200b", value=field_val, inline=False)
 
     return embed
 
