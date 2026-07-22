@@ -737,6 +737,7 @@ async def monitor_game_status():
     - If owner switches VC while bot is already connected, bot follows.
     """
     rl_running = is_rl_running()
+    global _shutdown_exit_code
 
     # ── RL just stopped ───────────────────────────────────────────────────────
     if not rl_running and bot._rl_was_running:
@@ -771,7 +772,6 @@ async def monitor_game_status():
     # ── RL not running and grace period expired → shutdown
     if not rl_running and not bot._rl_was_running:
         logger.warn("Rocket League was never detected within 60s of bot start. Shutting down.")
-        global _shutdown_exit_code
         _shutdown_exit_code = 2
         await bot.close()
         return
