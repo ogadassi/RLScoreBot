@@ -210,7 +210,6 @@ async def generate_status_from_chat(chat_text: str, api_key: str) -> tuple[str, 
                             parts = candidates[0]['content'].get('parts', [])
                             if parts:
                                 text_val = parts[0]['text'].strip()
-                                # Clean up leading markdown bullet points if model includes alternatives
                                 lines = [l.strip().lstrip('*').lstrip('>').strip() for l in text_val.splitlines() if l.strip()]
                                 status_text = lines[0] if lines else text_val
                                 if (status_text.startswith('"') and status_text.endswith('"')) or (status_text.startswith("'") and status_text.endswith("'")):
@@ -613,6 +612,7 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Failed to sync slash commands: {e}")
 
+    # Automatically generate status on boot
     if bot.guilds:
         await update_bot_status(bot.guilds[0])
 
