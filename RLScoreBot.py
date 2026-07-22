@@ -66,6 +66,20 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
             except OSError:
                 pass
 
+# ── Soundboard Manager ───────────────────────────────────────────────────────
+def get_available_sounds():
+    """Get all sound files in the sounds folder."""
+    dir_path = utils.full_path(SOUNDS_DIR_NAME)
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path)
+    files = [f for f in os.listdir(dir_path) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
+    return files if files else ["default_cheer.mp3"]
+
+def get_random_sound():
+    """Pick a random goal sound from the uploaded soundboard library."""
+    sounds = get_available_sounds()
+    return random.choice(sounds)
+
 # ── Bot Client Setup ──────────────────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.voice_states = True
@@ -83,12 +97,11 @@ def play_sound_in_vc(voice_client, sound_filename: str):
 
     sound_path = utils.full_path(SOUNDS_DIR_NAME, sound_filename)
     if not os.path.exists(sound_path):
-        # Fallback to default cheer sound if file not found
         sound_path = utils.full_path(SOUNDS_DIR_NAME, "default_cheer.mp3")
 
     ffmpeg_exec = utils.full_path(FFMPEG_NAME)
     if not os.path.exists(ffmpeg_exec):
-        ffmpeg_exec = "ffmpeg" # System PATH fallback
+        ffmpeg_exec = "ffmpeg"
 
     voice_client.play(discord.FFmpegPCMAudio(
         executable=ffmpeg_exec,
@@ -106,7 +119,7 @@ async def handle_index(request):
     return web.Response(text="RLScoreBot Cloud Engine Online.")
 
 async def handle_goal_webhook(request):
-    """API endpoint receiving BakkesMod goal pings."""
+    """API endpoint receiving goal pings from game telemetry or watcher."""
     try:
         data = await request.json()
     except Exception:
@@ -123,7 +136,6 @@ async def handle_goal_webhook(request):
     discord_user_id = user_info["discord_user_id"]
     guild_id = user_info.get("active_guild_id")
     vc_id = user_info.get("active_voice_channel_id")
-    selected_sound = user_info.get("selected_sound") or "default_cheer.mp3"
 
     if not guild_id or not vc_id:
         return web.json_response({"error": "User not active in a voice channel. Run /join in Discord."}, status=400)
@@ -143,15 +155,17 @@ async def handle_goal_webhook(request):
         except Exception as e:
             return web.json_response({"error": f"Failed to connect to voice: {e}"}, status=500)
 
-    # Trigger custom anthem!
-    success = play_sound_in_vc(voice_client, selected_sound)
+    # Pick a random sound or specific requested sound from the uploaded soundboard library
+    sound_to_play = data.get("sound") or get_random_sound()
+
+    # Trigger goal celebration sound!
+    success = play_sound_in_vc(voice_client, sound_to_play)
     if success:
-        database.record_goal_stat(discord_user_id, guild_id, selected_sound)
+        database.record_goal_stat(discord_user_id, guild_id, sound_to_play)
 
     return web.json_response({
         "status": "success",
-        "sound_played": selected_sound,
-        "user_id": discord_user_id
+        "sound_played": sound_to_play
     })
 
 async def handle_stats_api(request):
@@ -183,8 +197,8 @@ async def cmd_link(interaction: discord.Interaction):
     code = database.generate_linking_code(user_id)
     
     embed = discord.Embed(
-        title="⚡ RLScoreBot BakkesMod Pairing Code",
-        description=f"Your pairing code is: **`{code}`**\n\nEnter this code into the BakkesMod plugin menu in Rocket League to link your game telemetry.",
+        title="⚡ RLScoreBot Telemetry Pairing Code",
+        description=f"Your pairing code is: **`{code}`**\n\nEnter this code into your game plugin/watcher to link goal telemetry with your Discord Voice Channel.",
         color=discord.Color.blue()
     )
     embed.set_footer(text="Code expires after single use. Keep your pairing code private!")
@@ -208,10 +222,8 @@ async def cmd_join(interaction: discord.Interaction):
         await interaction.response.send_message(f"❌ Could not join voice channel: {e}", ephemeral=True)
         return
 
-    # Update active location in database
     database.update_user_location(str(interaction.user.id), str(guild.id), str(channel.id))
-    
-    await interaction.response.send_message(f"✅ Joined **{channel.name}** and linked your goal celebrations!")
+    await interaction.response.send_message(f"✅ Joined **{channel.name}** and ready to celebrate goals!")
 
 @bot.tree.command(name="leave", description="Disconnect bot from voice channel.")
 async def cmd_leave(interaction: discord.Interaction):
@@ -221,8 +233,8 @@ async def cmd_leave(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("❌ Bot is not in a voice channel.", ephemeral=True)
 
-@bot.tree.command(name="upload", description="Upload a custom goal celebration anthem (.mp3, .wav, .ogg).")
-async def cmd_upload(interaction: discord.Interaction, file: discord.Attachment, display_name: str = None):
+@bot.tree.command(name="upload", description="Upload a custom sound file to the goal soundboard (.mp3, .wav, .ogg).")
+async def cmd_upload(interaction: discord.Interaction, file: discord.Attachment, sound_name: str = None):
     ALLOWED_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".m4a"}
     MAX_SIZE = 25 * 1024 * 1024 # 25 MB
 
@@ -237,82 +249,61 @@ async def cmd_upload(interaction: discord.Interaction, file: discord.Attachment,
 
     await interaction.response.defer(ephemeral=True)
 
-    safe_basename = f"user_{interaction.user.id}_{int(asyncio.get_event_loop().time())}{ext}"
+    clean_title = sound_name or file.filename
+    safe_basename = re.sub(r'[^\w\s\.-]', '', clean_title).strip()
+    if not safe_basename.endswith(ext):
+        safe_basename += ext
+
     target_path = utils.full_path(SOUNDS_DIR_NAME, safe_basename)
     
-    # Download file bytes
     file_bytes = await file.read()
     with open(target_path, "wb") as f:
         f.write(file_bytes)
 
     # Normalize audio to -14 LUFS
     ok, msg = await normalize_audio(target_path)
-    
-    clean_name = display_name or file.filename
-    database.add_user_sound(str(interaction.user.id), safe_basename, clean_name, target_path)
-    database.set_user_sound(str(interaction.user.id), safe_basename)
+    database.add_user_sound(str(interaction.user.id), safe_basename, clean_title, target_path)
 
     embed = discord.Embed(
-        title="🎵 Custom Anthem Uploaded!",
-        description=f"Successfully uploaded and set **`{clean_name}`** as your active goal celebration anthem!\n\nVolume normalized to **{TARGET_LUFS} LUFS**.",
+        title="🎵 New Sound Uploaded to Soundboard!",
+        description=f"Successfully added **`{clean_title}`** to the goal celebration soundboard!\n\nVolume normalized to **{TARGET_LUFS} LUFS**.",
         color=discord.Color.green()
     )
     await interaction.followup.send(embed=embed)
 
-@bot.tree.command(name="sound", description="Set your active goal anthem from your library or defaults.")
-async def cmd_sound(interaction: discord.Interaction, sound_name: str):
-    user_sounds = database.get_user_sounds(str(interaction.user.id))
-    defaults = ["default_cheer.mp3", "default_airhorn.mp3"]
-
-    # Check if matches user sound or default
-    matched_file = None
-    for s in user_sounds:
-        if sound_name.lower() in s["display_name"].lower() or sound_name.lower() in s["filename"].lower():
-            matched_file = s["filename"]
-            break
-            
-    if not matched_file:
-        for d in defaults:
-            if sound_name.lower() in d.lower():
-                matched_file = d
-                break
-
-    if not matched_file:
-        await interaction.response.send_message(f"❌ Sound `{sound_name}` not found in your library. Use `/my_sounds` to view your sounds.", ephemeral=True)
-        return
-
-    database.set_user_sound(str(interaction.user.id), matched_file)
-    await interaction.response.send_message(f"✅ Set **`{sound_name}`** as your active goal anthem!", ephemeral=True)
-
-@bot.tree.command(name="my_sounds", description="List your uploaded custom goal anthems.")
-async def cmd_my_sounds(interaction: discord.Interaction):
-    user_sounds = database.get_user_sounds(str(interaction.user.id))
-    
+@bot.tree.command(name="list", description="List all available goal celebration sounds.")
+async def cmd_list(interaction: discord.Interaction):
+    sounds = get_available_sounds()
     embed = discord.Embed(
-        title="🎧 Your Goal Anthem Library",
+        title="🎧 Goal Celebration Soundboard",
         color=discord.Color.purple()
     )
-    
-    embed.add_field(name="Default Starters", value="• `default_cheer.mp3` (Stadium Cheer)\n• `default_airhorn.mp3` (Hype Airhorn)", inline=False)
-    
-    if user_sounds:
-        custom_lines = "\n".join([f"• **{s['display_name']}** (`{s['filename']}`)" for s in user_sounds])
-        embed.add_field(name="Your Uploaded Anthems", value=custom_lines, inline=False)
-    else:
-        embed.add_field(name="Your Uploaded Anthems", value="*No custom anthems uploaded yet. Use `/upload` to add one!*", inline=False)
-        
+    sound_lines = "\n".join([f"• `{s}`" for s in sounds])
+    embed.add_field(name="Available Sounds", value=sound_lines or "No sounds loaded.", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="stats", description="Display server goal statistics and leaderboards.")
+@bot.tree.command(name="play", description="Manually trigger a goal sound in the voice channel.")
+async def cmd_play(interaction: discord.Interaction, sound_name: str = None):
+    if not interaction.guild.voice_client:
+        await interaction.response.send_message("❌ Bot is not in a voice channel. Run `/join` first.", ephemeral=True)
+        return
+
+    sound_to_play = sound_name or get_random_sound()
+    success = play_sound_in_vc(interaction.guild.voice_client, sound_to_play)
+    if success:
+        await interaction.response.send_message(f"▶ Playing **`{sound_to_play}`**!")
+    else:
+        await interaction.response.send_message("⏯️ Bot is already playing a sound.", ephemeral=True)
+
+@bot.tree.command(name="stats", description="Display goal statistics.")
 async def cmd_stats(interaction: discord.Interaction):
     stats = database.get_global_stats()
     embed = discord.Embed(
-        title="🏆 RLScoreBot Global Statistics",
+        title="🏆 RLScoreBot Goal Statistics",
         color=discord.Color.gold()
     )
     embed.add_field(name="⚽ Total Goals Celebrated", value=f"**{stats['total_goals']}**", inline=True)
-    embed.add_field(name="👤 Active Players", value=f"**{stats['total_users']}**", inline=True)
-    embed.add_field(name="🎵 Custom Anthems", value=f"**{stats['total_sounds']}**", inline=True)
+    embed.add_field(name="🎵 Soundboard Library Size", value=f"**{len(get_available_sounds())}**", inline=True)
     await interaction.response.send_message(embed=embed)
 
 @bot.event
@@ -324,7 +315,6 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Failed to sync slash commands: {e}")
 
-    # Start Embedded Web Server
     app = web.Application()
     setup_web_routes(app)
     runner = web.AppRunner(app)
