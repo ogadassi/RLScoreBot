@@ -173,12 +173,13 @@ async def fetch_random_chat_history(guild):
 
 async def generate_status_from_chat(chat_text: str, api_key: str) -> tuple[str, str]:
     """
-    Verified Working Models with Rate-Limit Resilience
+    Guaranteed Active Gemini API Model Endpoints
     """
     models_to_try = [
-        "gemini-2.5-flash",
+        "gemini-flash-latest",
         "gemini-2.0-flash",
-        "gemini-2.5-pro"
+        "gemini-pro-latest",
+        "gemini-2.5-flash"
     ]
 
     prompt = (
@@ -208,14 +209,17 @@ async def generate_status_from_chat(chat_text: str, api_key: str) -> tuple[str, 
                         if candidates and 'content' in candidates[0]:
                             parts = candidates[0]['content'].get('parts', [])
                             if parts:
-                                status_text = parts[0]['text'].strip()
+                                text_val = parts[0]['text'].strip()
+                                # Clean up leading markdown bullet points if model includes alternatives
+                                lines = [l.strip().lstrip('*').lstrip('>').strip() for l in text_val.splitlines() if l.strip()]
+                                status_text = lines[0] if lines else text_val
                                 if (status_text.startswith('"') and status_text.endswith('"')) or (status_text.startswith("'") and status_text.endswith("'")):
                                     status_text = status_text[1:-1].strip()
                                 return status_text[:120], f"Model {model}"
                     elif response.status == 429:
-                        last_error = f"Gemini {model} rate limited (HTTP 429). Waiting 2s before trying next model..."
+                        last_error = f"Gemini {model} rate limited (HTTP 429). Retrying next model..."
                         logger.warn(last_error)
-                        await asyncio.sleep(2)
+                        await asyncio.sleep(1)
                     else:
                         err_text = await response.text()
                         last_error = f"Gemini {model} HTTP {response.status}: {err_text[:100]}"
