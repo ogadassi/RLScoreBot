@@ -6,9 +6,10 @@ import json
 import sqlite3
 import aiohttp
 from aiohttp import web
+from datetime import datetime as _dt, timezone, timedelta
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 import utils
@@ -16,9 +17,10 @@ import database
 import logger
 
 load_dotenv()
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-OWNER_ID      = int(os.getenv("OWNER_ID", "0"))
-WEB_PORT      = int(os.getenv("PORT", "8080"))
+DISCORD_TOKEN  = os.getenv("DISCORD_TOKEN")
+OWNER_ID       = int(os.getenv("OWNER_ID", "0"))
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+WEB_PORT       = int(os.getenv("PORT", "8080"))
 
 SOUNDS_DIR_NAME = "sounds"
 WEBSITE_DIR_NAME = "website"
@@ -66,9 +68,81 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
             except OSError:
                 pass
 
+# ── Gemini AI Status Generation ─────────────────────────────────────────────
+async def fetch_random_chat_history(guild):
+    """Finds a text channel named 'general' in the guild and returns sample messages."""
+    general_channel = None
+    for channel in guild.text_channels:
+        if channel.name.lower() in ["general", "chat", "main"]:
+            general_channel = channel
+            break
+            
+    if not general_channel:
+        logger.warn("Could not find 'general' channel to fetch status history.")
+        return None
+
+    try:
+        messages = []
+        async for msg in general_channel.history(limit=50):
+            if msg.author.bot or not msg.content.strip():
+                continue
+            messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
+            
+        if not messages:
+            return None
+        return "\n".join(messages)
+    except Exception as e:
+        logger.warn(f"Failed to fetch chat history: {e}")
+        return None
+
+async def generate_status_from_chat(chat_log: str, api_key: str) -> str:
+    """Uses Gemini API to synthesize a funny status from server chat history."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    prompt = (
+        "Below is a chat log from a Discord server's general chat. "
+        "Create a funny, short, iconic 1-sentence Discord status (under 100 characters) "
+        "that captures the vibe or inside jokes of the conversation. Output ONLY the status text.\n\n"
+        f"CHAT LOG:\n{chat_log}"
+    )
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, timeout=15) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    candidates = data.get('candidates', [])
+                    if candidates and 'content' in candidates[0]:
+                        parts = candidates[0]['content'].get('parts', [])
+                        if parts:
+                            status_text = parts[0]['text'].strip().strip('"').strip("'")
+                            return status_text[:120]
+                return None
+    except Exception as e:
+        logger.warn(f"Gemini API status generation failed: {e}")
+        return None
+
+async def update_bot_status(guild) -> str:
+    """Orchestrates status update using chat history and Gemini API."""
+    if not GEMINI_API_KEY:
+        return None
+
+    chat_log = await fetch_random_chat_history(guild)
+    if not chat_log:
+        return None
+
+    status_text = await generate_status_from_chat(chat_log, GEMINI_API_KEY)
+    if status_text:
+        activity = discord.CustomActivity(name=status_text)
+        await bot.change_presence(activity=activity)
+        logger.success(f"Custom status updated to: \"{status_text}\"")
+        return status_text
+    return None
+
 # ── Soundboard Manager ───────────────────────────────────────────────────────
 def get_available_sounds():
-    """Get all sound files in the sounds folder."""
     dir_path = utils.full_path(SOUNDS_DIR_NAME)
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
@@ -76,17 +150,16 @@ def get_available_sounds():
     return files if files else ["default_cheer.mp3"]
 
 def get_random_sound():
-    """Pick a random goal sound from the uploaded soundboard library."""
     sounds = get_available_sounds()
     return random.choice(sounds)
 
 # ── Bot Client Setup ──────────────────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.voice_states = True
+intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents, help_command=None)
 
 def play_sound_in_vc(voice_client, sound_filename: str):
-    """Play specified audio file in Discord Voice Channel."""
     if not voice_client or not voice_client.is_connected():
         logger.warn("Voice client not connected.")
         return False
@@ -112,14 +185,12 @@ def play_sound_in_vc(voice_client, sound_filename: str):
 
 # ── Embedded Web Server & Webhooks ────────────────────────────────────────────
 async def handle_index(request):
-    """Serve website landing page."""
     index_path = utils.full_path(WEBSITE_DIR_NAME, "index.html")
     if os.path.exists(index_path):
         return web.FileResponse(index_path)
     return web.Response(text="RLScoreBot Cloud Engine Online.")
 
 async def handle_goal_webhook(request):
-    """API endpoint receiving goal pings from game telemetry or watcher."""
     try:
         data = await request.json()
     except Exception:
@@ -155,10 +226,7 @@ async def handle_goal_webhook(request):
         except Exception as e:
             return web.json_response({"error": f"Failed to connect to voice: {e}"}, status=500)
 
-    # Pick a random sound or specific requested sound from the uploaded soundboard library
     sound_to_play = data.get("sound") or get_random_sound()
-
-    # Trigger goal celebration sound!
     success = play_sound_in_vc(voice_client, sound_to_play)
     if success:
         database.record_goal_stat(discord_user_id, guild_id, sound_to_play)
@@ -169,7 +237,6 @@ async def handle_goal_webhook(request):
     })
 
 async def handle_stats_api(request):
-    """API endpoint for website counters."""
     stats = database.get_global_stats()
     return web.json_response(stats)
 
@@ -178,7 +245,6 @@ def setup_web_routes(app):
     app.router.add_post("/api/v1/goal", handle_goal_webhook)
     app.router.add_get("/api/v1/stats", handle_stats_api)
     
-    # Static website assets & sounds
     website_path = utils.full_path(WEBSITE_DIR_NAME)
     sounds_path = utils.full_path(SOUNDS_DIR_NAME)
     
@@ -236,7 +302,7 @@ async def cmd_leave(interaction: discord.Interaction):
 @bot.tree.command(name="upload", description="Upload a custom sound file to the goal soundboard (.mp3, .wav, .ogg).")
 async def cmd_upload(interaction: discord.Interaction, file: discord.Attachment, sound_name: str = None):
     ALLOWED_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".m4a"}
-    MAX_SIZE = 25 * 1024 * 1024 # 25 MB
+    MAX_SIZE = 25 * 1024 * 1024
 
     _, ext = os.path.splitext(file.filename.lower())
     if ext not in ALLOWED_EXTENSIONS:
@@ -260,7 +326,6 @@ async def cmd_upload(interaction: discord.Interaction, file: discord.Attachment,
     with open(target_path, "wb") as f:
         f.write(file_bytes)
 
-    # Normalize audio to -14 LUFS
     ok, msg = await normalize_audio(target_path)
     database.add_user_sound(str(interaction.user.id), safe_basename, clean_title, target_path)
 
@@ -295,6 +360,15 @@ async def cmd_play(interaction: discord.Interaction, sound_name: str = None):
     else:
         await interaction.response.send_message("⏯️ Bot is already playing a sound.", ephemeral=True)
 
+@bot.tree.command(name="status_sync", description="Trigger an AI-generated custom status from general chat history.")
+async def cmd_status_sync(interaction: discord.Interaction):
+    await interaction.response.defer()
+    status_text = await update_bot_status(interaction.guild)
+    if status_text:
+        await interaction.followup.send(f"✅ Updated bot status to: \"{status_text}\"")
+    else:
+        await interaction.followup.send("⚠️ Could not generate status. Ensure `GEMINI_API_KEY` is configured in .env and a 'general' text channel exists.")
+
 @bot.tree.command(name="stats", description="Display goal statistics.")
 async def cmd_stats(interaction: discord.Interaction):
     stats = database.get_global_stats()
@@ -306,6 +380,13 @@ async def cmd_stats(interaction: discord.Interaction):
     embed.add_field(name="🎵 Soundboard Library Size", value=f"**{len(get_available_sounds())}**", inline=True)
     await interaction.response.send_message(embed=embed)
 
+@tasks.loop(hours=6)
+async def auto_status_loop():
+    for guild in bot.guilds:
+        status_text = await update_bot_status(guild)
+        if status_text:
+            break
+
 @bot.event
 async def on_ready():
     logger.success(f"Logged in as {bot.user} (ID: {bot.user.id})")
@@ -314,6 +395,9 @@ async def on_ready():
         logger.info(f"Synced {len(synced)} slash commands globally.")
     except Exception as e:
         logger.error(f"Failed to sync slash commands: {e}")
+
+    if not auto_status_loop.is_running():
+        auto_status_loop.start()
 
     app = web.Application()
     setup_web_routes(app)
