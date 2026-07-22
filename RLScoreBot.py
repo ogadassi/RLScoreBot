@@ -173,12 +173,12 @@ async def fetch_random_chat_history(guild):
 
 async def generate_status_from_chat(chat_text: str, api_key: str) -> tuple[str, str]:
     """
-    Exact Legacy Prompting & Valid Active Gemini Endpoint Models
+    Verified Working Models with Rate-Limit Resilience
     """
     models_to_try = [
+        "gemini-2.5-flash",
         "gemini-2.0-flash",
-        "gemini-2.0-flash-exp",
-        "gemini-1.5-flash-8b"
+        "gemini-2.5-pro"
     ]
 
     prompt = (
@@ -213,9 +213,9 @@ async def generate_status_from_chat(chat_text: str, api_key: str) -> tuple[str, 
                                     status_text = status_text[1:-1].strip()
                                 return status_text[:120], f"Model {model}"
                     elif response.status == 429:
-                        last_error = f"Gemini {model} rate limited (HTTP 429). Retrying next model..."
+                        last_error = f"Gemini {model} rate limited (HTTP 429). Waiting 2s before trying next model..."
                         logger.warn(last_error)
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(2)
                     else:
                         err_text = await response.text()
                         last_error = f"Gemini {model} HTTP {response.status}: {err_text[:100]}"
