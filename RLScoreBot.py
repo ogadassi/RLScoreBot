@@ -6,9 +6,6 @@ import json
 import time
 import aiohttp
 import functools
-import cv2
-import numpy as np
-from PIL import ImageGrab
 from datetime import datetime as _dt, timezone, timedelta
 import discord
 from discord.ext import commands, tasks
@@ -474,89 +471,70 @@ async def test_cmd(ctx):
 
 # ── Goal Detection Loop ───────────────────────────────────────────────────────
 
-prev_img = None
-img = None
 consecutive_frames  = 0
 last_detected_idx   = -1
 current_game_score  = -1
 
 @tasks.loop(seconds=0.1)
 async def check_goal(guild):
-    global prev_img, img, consecutive_frames, last_detected_idx, current_game_score
+    global consecutive_frames, last_detected_idx, current_game_score
 
     voice_client = guild.voice_client
     if not voice_client or not voice_client.is_connected():
         return
 
     try:
-        raw_screen = ImageGrab.grab()
-        screen_np   = np.array(raw_screen)
-        screen_bgr  = cv2.cvtColor(screen_np, cv2.COLOR_RGB2BGR)
+        # score_detector.get_score_img() handles window detection, cropping,
+        # resizing, and PIL processing — raises RuntimeError if RL is not
+        # focused/foreground, which we silently ignore.
+        img = score_detector.get_score_img()
 
-        h, w = screen_bgr.shape[:2]
-        crop_h = int(h * 0.15)
-        crop_w = int(w * 0.30)
-        start_x = int((w - crop_w) / 2)
+        best_match     = -1.0
+        best_match_idx = -1
+        for i, saved_img in enumerate(score_detector.SAVED_IMAGES):
+            score = score_detector.compare_images(img, saved_img)
+            if score > best_match:
+                best_match     = score
+                best_match_idx = i
 
-        cropped = screen_bgr[0:crop_h, start_x:start_x + crop_w]
-        img = score_detector.process_image(cropped)
-
-        if prev_img is None:
-            prev_img = img
-            return
-
-        diff_score = score_detector.calculate_image_difference(img, prev_img)
-
-        if diff_score > 0.05:
-            best_match = -1.0
-            best_match_idx = -1
-
-            for i, saved_img in enumerate(score_detector.SAVED_IMAGES):
-                score = score_detector.compare_images(img, saved_img)
-                if score > best_match:
-                    best_match     = score
-                    best_match_idx = i
-
-            if best_match > score_detector.SAVED_IMAGE_SIMILARITY_THRESHOLD:
-                if best_match_idx == last_detected_idx:
-                    consecutive_frames += 1
-                else:
-                    consecutive_frames = 1
-                    last_detected_idx  = best_match_idx
-
-                if consecutive_frames >= 3:
-                    if current_game_score == -1:
-                        current_game_score = best_match_idx
-                        logger.detection("Initialized", f"score = {current_game_score}")
-                        prev_img = img
-                        return
-
-                    if best_match_idx == 0:
-                        if current_game_score != 0:
-                            logger.detection("Game reset", "score → 0")
-                            current_game_score = 0
-                        prev_img = img
-                        return
-
-                    if best_match_idx == current_game_score + 1:
-                        logger.goal(current_game_score, best_match_idx)
-                        current_game_score = best_match_idx
-                        record_goal()
-                        play_sound(voice_client, random_sound())
-                        consecutive_frames = 0
-                        prev_img = img
-                        return
-
-                    if best_match_idx == current_game_score:
-                        prev_img = img
-                        return
-
-                    consecutive_frames = 0
-                    prev_img = img
+        if best_match > score_detector.SAVED_IMAGE_SIMILARITY_THRESHOLD:
+            if best_match_idx == last_detected_idx:
+                consecutive_frames += 1
             else:
-                consecutive_frames = 0
-                last_detected_idx  = -1
+                consecutive_frames = 1
+                last_detected_idx  = best_match_idx
 
+            if consecutive_frames >= 3:
+                if current_game_score == -1:
+                    current_game_score = best_match_idx
+                    logger.detection("Initialized", f"score = {current_game_score}")
+                    return
+
+                if best_match_idx == 0:
+                    if current_game_score != 0:
+                        logger.detection("Game reset", "score → 0")
+                        current_game_score = 0
+                    return
+
+                if best_match_idx == current_game_score + 1:
+                    logger.goal(current_game_score, best_match_idx)
+                    current_game_score = best_match_idx
+                    record_goal()
+                    play_sound(voice_client, random_sound())
+                    consecutive_frames = 0
+                    return
+
+                if best_match_idx == current_game_score:
+                    return
+
+                consecutive_frames = 0
+        else:
+            consecutive_frames = 0
+            last_detected_idx  = -1
+
+    except RuntimeError:
+        # RL not focused / minimized — silent, expected during normal use
+        pass
     except Exception as e:
         logger.error(f"Detection loop: {e}")
 
