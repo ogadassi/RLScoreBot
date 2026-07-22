@@ -70,6 +70,10 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
 
 # ── Robust Gemini AI Status Generation Engine ───────────────────────────────
 async def fetch_random_chat_history(guild):
+    """
+    Randomized historical chat sampler:
+    Picks a random text channel and samples 50 messages from a random point in time.
+    """
     candidate_channels = [
         c for c in guild.text_channels 
         if c.permissions_for(guild.me).read_message_history and c.permissions_for(guild.me).read_messages
@@ -113,8 +117,7 @@ async def generate_status_from_chat(chat_log: str, api_key: str) -> tuple[str, s
         "gemini-2.0-flash",
         "gemini-2.5-flash",
         "gemini-1.5-flash-latest",
-        "gemini-1.5-pro-latest",
-        "gemini-pro"
+        "gemini-1.5-pro-latest"
     ]
 
     prompt = (
@@ -142,6 +145,9 @@ async def generate_status_from_chat(chat_log: str, api_key: str) -> tuple[str, s
                             if parts:
                                 status_text = parts[0]['text'].strip().strip('"').strip("'")
                                 return status_text[:120], f"Model {model}"
+                    elif response.status == 429:
+                        last_error = f"Gemini API rate limited (HTTP 429). Please wait before requesting again."
+                        logger.warn(last_error)
                     else:
                         err_text = await response.text()
                         last_error = f"Gemini {model} HTTP {response.status}: {err_text[:100]}"
@@ -152,7 +158,11 @@ async def generate_status_from_chat(chat_log: str, api_key: str) -> tuple[str, s
 
     return None, last_error
 
+_last_status_update_time = None
+
 async def update_bot_status(guild) -> tuple[str, str]:
+    global _last_status_update_time
+
     if not GEMINI_API_KEY:
         default_status = "Watching Rocket League ⚽ | /join or >join"
         activity = discord.CustomActivity(name=default_status)
@@ -170,13 +180,14 @@ async def update_bot_status(guild) -> tuple[str, str]:
     if status_text:
         activity = discord.CustomActivity(name=status_text)
         await bot.change_presence(activity=activity)
+        _last_status_update_time = _dt.now(timezone.utc)
         logger.success(f"Custom status updated to: \"{status_text}\"")
         return status_text, f"Generated from {channel_info} via {gen_info}"
 
     default_status = "Watching Rocket League ⚽ | /join or >join"
     activity = discord.CustomActivity(name=default_status)
     await bot.change_presence(activity=activity)
-    return default_status, f"AI generation error: {gen_info}"
+    return default_status, f"AI generation fallback: {gen_info}"
 
 # ── Soundboard Manager ───────────────────────────────────────────────────────
 def get_available_sounds():
@@ -222,28 +233,24 @@ def play_sound_in_vc(voice_client, sound_filename: str):
 
 # ── Embedded Web Server & Webhooks ────────────────────────────────────────────
 async def handle_index(request):
-    """Serve website landing page."""
     index_path = os.path.join(os.path.dirname(__file__), WEBSITE_DIR_NAME, "index.html")
     if os.path.exists(index_path):
         return web.FileResponse(index_path)
     return web.Response(text="<h1>RLScoreBot Cloud Engine Online</h1>", content_type="text/html")
 
 async def handle_style(request):
-    """Serve style.css directly with text/css content type."""
     css_path = os.path.join(os.path.dirname(__file__), WEBSITE_DIR_NAME, "style.css")
     if os.path.exists(css_path):
         return web.FileResponse(css_path)
     return web.Response(status=404)
 
 async def handle_app_js(request):
-    """Serve app.js directly with application/javascript content type."""
     js_path = os.path.join(os.path.dirname(__file__), WEBSITE_DIR_NAME, "app.js")
     if os.path.exists(js_path):
         return web.FileResponse(js_path)
     return web.Response(status=404)
 
 async def handle_logo(request):
-    """Serve logo.png directly."""
     logo_path = os.path.join(os.path.dirname(__file__), WEBSITE_DIR_NAME, "logo.png")
     if os.path.exists(logo_path):
         return web.FileResponse(logo_path)
@@ -395,14 +402,22 @@ async def slash_leave(interaction: discord.Interaction):
     await interaction.followup.send(msg, ephemeral=True)
 
 @bot.tree.command(name="upload", description="Upload a custom sound file to the goal soundboard.")
+@app_commands.describe(file="Select an audio file (.mp3, .wav, .ogg)", sound_name="Optional custom title")
 async def slash_upload(interaction: discord.Interaction, file: discord.Attachment, sound_name: str = None):
-    await interaction.response.defer(ephemeral=True)
-    file_bytes = await file.read()
-    ok, res = await do_upload(str(interaction.user.id), file.filename, file_bytes, sound_name)
-    if ok:
-        await interaction.followup.send(embed=res, ephemeral=True)
-    else:
-        await interaction.followup.send(res, ephemeral=True)
+    try:
+        await interaction.response.defer(ephemeral=True)
+        file_bytes = await file.read()
+        ok, res = await do_upload(str(interaction.user.id), file.filename, file_bytes, sound_name)
+        if ok:
+            await interaction.followup.send(embed=res, ephemeral=True)
+        else:
+            await interaction.followup.send(res, ephemeral=True)
+    except Exception as e:
+        logger.error(f"Slash upload failed: {e}")
+        try:
+            await interaction.followup.send(f"❌ Upload failed: {e}", ephemeral=True)
+        except Exception:
+            pass
 
 @bot.tree.command(name="list", description="List all available goal celebration sounds.")
 async def slash_list(interaction: discord.Interaction):
@@ -485,7 +500,7 @@ async def cmd_play(ctx, sound_name: str = None):
     else:
         await ctx.send("⏯️ Bot is already playing a sound.")
 
-@bot.command(name="status_sync", help="Manually trigger AI status sync (Owner & Admin Only).")
+@bot.command(name="status_sync", help="Manually trigger an AI status sync (Owner & Admin Only).")
 async def cmd_status_sync(ctx):
     is_owner = (ctx.author.id == OWNER_ID)
     is_admin = ctx.author.guild_permissions.administrator if ctx.guild else False
@@ -512,10 +527,10 @@ async def cmd_stats(ctx):
 
 @tasks.loop(hours=6)
 async def auto_status_loop():
-    for guild in bot.guilds:
-        status_text, _ = await update_bot_status(guild)
-        if status_text != "Watching Rocket League ⚽ | /join or >join":
-            break
+    if bot.guilds:
+        # Pick 1 random guild to update status once per 6 hours (prevents multi-server loops & rate limits)
+        guild = random.choice(bot.guilds)
+        await update_bot_status(guild)
 
 @bot.event
 async def on_ready():
@@ -526,8 +541,9 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Failed to sync slash commands: {e}")
 
-    for guild in bot.guilds:
-        await update_bot_status(guild)
+    # Set status ONCE on boot for 1 guild
+    if bot.guilds:
+        await update_bot_status(bot.guilds[0])
 
     if not auto_status_loop.is_running():
         auto_status_loop.start()
