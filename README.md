@@ -1,24 +1,41 @@
-# ⚡ RLScoreBot — Custom Goal Anthems for Rocket League
+# ⚡ RLScoreBot — Automated Goal Soundboard for Rocket League
 
-[![Release](https://img.shields.io/badge/release-v2.0.0--cloud-00f0ff.svg)](https://github.com/ogadassi/RLScoreBot/releases)
+[![Website](https://img.shields.io/badge/Website-2026%20Gaming%20UI-00f0ff.svg)](https://ogadassi.github.io/RLScoreBot/)
+[![Release](https://img.shields.io/badge/release-v2.0.0--cloud-ff6b00.svg)](https://github.com/ogadassi/RLScoreBot/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](LICENSE)
 [![Discord API](https://img.shields.io/badge/Discord-Slash%20Commands-5865F2.svg)](https://discord.com/developers/docs)
 [![BakkesMod](https://img.shields.io/badge/BakkesMod-Telemetry-green.svg)](https://www.bakkesmod.com/)
 
-**RLScoreBot** is a 24/7 Cloud-Hosted Discord Bot & 2026 Web Application that plays **custom uploaded goal celebration anthems** in your Discord Voice Channel whenever you score in Rocket League!
+🌐 **Live Web Application**: [https://ogadassi.github.io/RLScoreBot/](https://ogadassi.github.io/RLScoreBot/)
+
+**RLScoreBot** is a 24/7 Cloud-Hosted Discord Bot & 2026 Web Application that plays **custom uploaded goal celebration sounds** in your Discord Voice Channel whenever a goal is scored in Rocket League!
 
 > 📜 **Looking for the legacy v1.0 Standalone Desktop version (Computer Vision / PyWin32)?**  
 > Check out the [v1.0.0-desktop Release](https://github.com/ogadassi/RLScoreBot/releases/tag/v1.0.0-desktop) or switch to the [`legacy/desktop-cv`](https://github.com/ogadassi/RLScoreBot/tree/legacy/desktop-cv) branch.
 
 ---
 
+## 🌐 How the Bot & Website are Hosted
+
+The application uses a **hybrid hosting architecture**:
+
+1. **Live Website (GitHub Pages)**:
+   - Hosted automatically at [https://ogadassi.github.io/RLScoreBot/](https://ogadassi.github.io/RLScoreBot/) via GitHub Actions (`.github/workflows/deploy-pages.yml`).
+   - Features the interactive soundboard preview, command explorer, and 1-click Discord bot invite link.
+
+2. **24/7 Cloud Bot Engine (Unified Docker App)**:
+   - The bot script ([RLScoreBot.py](file:///f:/Programming/new%20stuff/RLScoreBot/RLScoreBot.py)) runs an embedded `aiohttp` web server.
+   - It hosts the Discord Bot connection, SQLite database, and webhook API (`POST /api/v1/goal`) inside a single container via `Dockerfile` / `docker-compose.yml`.
+   - Can be hosted for **100% free 24/7** on **Oracle Cloud (Always Free)**, **Koyeb**, **Render**, or **Railway**.
+
+---
+
 ## 🚀 Key Features
 
-* 🎵 **User-Uploaded Custom Anthems**: Every player can upload their own custom sound clips (`/upload`). When **Player A** scores, **Player A's custom anthem** plays! When **Player B** scores, **Player B's custom anthem** plays!
-* 🎚️ **-14 LUFS Audio Normalization Engine**: Every user-uploaded sound file (`.mp3`, `.wav`, `.ogg`, `.flac`) is automatically processed with `ffmpeg` to match standard broadcasting loudness (-14 LUFS).
+* 🎵 **Custom Soundboard Library**: Server members can upload custom celebration sound clips (`/upload`). All uploads are automatically processed via `ffmpeg` to match standard broadcasting loudness (**-14 LUFS**).
 * 🔌 **Zero-Friction BakkesMod Telemetry**: A silent C++ BakkesMod plugin catches goal events in Rocket League memory with **0% CPU/GPU overhead** and pings the cloud bot.
-* 🌐 **2026 Gaming Web Application**: Embedded web interface featuring an interactive soundboard preview, command search explorer, and 1-click Discord invite generator.
-* 🐳 **Docker & Cloud Ready**: Fully containerized with `Dockerfile` and `docker-compose.yml` for 1-click deployment on free cloud tiers (Oracle Cloud, Koyeb, Render).
+* 🌐 **2026 Gaming Web Application**: Interactive Web UI featuring sound previews, command search explorer, and 1-click Discord invite generator.
+* 🐳 **1-Click Container Deployment**: Built with `Dockerfile` and `docker-compose.yml` for instant deployment.
 
 ---
 
@@ -29,13 +46,14 @@
  │   Gamer's PC (RL)       │               │      Cloud Server (24/7)        │               │   Friends' Discord VC   │
  │                         │               │                                 │               │                         │
  │  BakkesMod Plugin       │──HTTP Webhook─►  FastAPI / aiohttp Web Endpoint  │               │  Bot joins VC & plays   │
- │  (Detects Goal Event)   │   (/api/goal) │                │                │──Voice Audio─►│  Player's Custom Anthem │
+ │  (Detects Goal Event)   │   (/api/goal) │                │                │──Voice Audio─►│  Goal Celebration Sound │
  └─────────────────────────┘               │  Discord Bot (discord.py)       │               └─────────────────────────┘
                                            └─────────────────────────────────┘
                                                             ▲
-                                                            │ Serves Web App
+                                                            │ GitHub Actions
                                            ┌────────────────┴────────────────┐
-                                           │  2026 Gaming Website / Landing  │
+                                           │  Live GitHub Pages Web App      │
+                                           │  https://ogadassi.github.io     │
                                            │  • 1-Click Discord Invite       │
                                            │  • Custom Sound Test & Upload   │
                                            │  • Live Command List & Stats    │
@@ -49,25 +67,16 @@
 | Command | Description |
 | :--- | :--- |
 | `/link` | Generate a private 6-digit code to pair your BakkesMod plugin with Discord. |
-| `/upload <file>` | Upload a custom goal celebration anthem (auto-normalized to -14 LUFS). |
-| `/sound [name]` | Set your active goal anthem from your uploaded library or default starters. |
-| `/my_sounds` | List all custom goal anthems uploaded by you. |
+| `/upload <file>` | Upload a custom goal celebration sound (auto-normalized to -14 LUFS). |
+| `/list` | List all available sounds loaded in the goal soundboard. |
+| `/play [name]` | Manually trigger a goal sound in the voice channel. |
 | `/join` | Connect RLScoreBot to your current Discord voice channel. |
 | `/leave` | Disconnect RLScoreBot from voice channel. |
-| `/stats` | Display server goal leaderboards and play counts. |
+| `/stats` | Display server goal statistics and play counts. |
 
 ---
 
-## ⚡ Quick Setup Guide
-
-1. **Add Bot to Discord**: Click the 1-click invite link on the website or Developer Portal.
-2. **Pair Game**: Type `/link` in Discord to get your 6-digit code. Paste it into the BakkesMod plugin settings (**F2** menu in Rocket League).
-3. **Upload Your Anthem**: Attach a sound clip using `/upload <file>` and set it with `/sound`.
-4. **Score & Celebrate!** Join a voice channel with `/join` and play Rocket League!
-
----
-
-## 🐳 Self-Hosting with Docker
+## 🐳 Self-Hosting the Cloud Engine with Docker
 
 ```bash
 # 1. Clone the repository
@@ -78,7 +87,7 @@ cd RLScoreBot
 cp .env.example .env
 # Edit .env with your DISCORD_TOKEN and OWNER_ID
 
-# 3. Launch Docker Container
+# 3. Launch Container
 docker-compose up -d
 ```
 
