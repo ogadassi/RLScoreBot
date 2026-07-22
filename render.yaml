@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: rlscorebot
+    env: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /api/v1/stats
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: PORT
+        value: 8080
