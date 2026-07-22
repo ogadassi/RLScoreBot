@@ -32,7 +32,7 @@ def init_db():
             )
         """)
         
-        # Server Uploaded Sounds Library (Scoped to guild_id)
+        # Server Uploaded Sounds Library
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_sounds (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,11 +45,10 @@ def init_db():
             )
         """)
 
-        # Ensure guild_id column exists if table was created previously
         try:
             cursor.execute("ALTER TABLE user_sounds ADD COLUMN guild_id TEXT")
         except sqlite3.OperationalError:
-            pass # Column already exists
+            pass
 
         # Goal Statistics
         cursor.execute("""
@@ -64,7 +63,6 @@ def init_db():
         
         conn.commit()
 
-    # Migrate stats.json if present
     migrate_historical_stats()
 
 def migrate_historical_stats():
@@ -148,10 +146,13 @@ def add_guild_sound(discord_user_id: str, guild_id: str, filename: str, display_
         conn.commit()
 
 def get_guild_sounds(guild_id: str) -> List[Dict[str, Any]]:
-    """Retrieve all sounds uploaded by users in a specific server."""
+    """Retrieve all sounds uploaded in this server OR legacy global sounds."""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM user_sounds WHERE guild_id = ?", (str(guild_id),))
+        cursor.execute("""
+            SELECT * FROM user_sounds 
+            WHERE guild_id = ? OR guild_id IS NULL OR guild_id = '' OR guild_id = 'system_guild'
+        """, (str(guild_id),))
         return [dict(row) for row in cursor.fetchall()]
 
 def record_goal_stat(discord_user_id: str, guild_id: str, sound_played: str):

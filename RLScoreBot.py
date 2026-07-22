@@ -76,27 +76,28 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
             except OSError:
                 pass
 
-# ── Soundboard Manager (100% Server Guild Scoped) ───────────────────────────
+# ── Soundboard Manager (Server Guild Scoped + Physical Sound Files) ─────────
 def get_guild_sound_library(guild_id: str = None) -> list[str]:
     """
-    Returns server-specific uploaded sounds combined with default starter sounds.
-    Ensures sounds uploaded in Server A stay isolated to Server A!
+    Returns server-specific uploaded sounds combined with physical disk files and default starter sounds.
     """
     default_sounds = ["default_cheer.mp3", "default_airhorn.mp3"]
     
-    if not guild_id:
-        dir_path = utils.full_path(SOUNDS_DIR_NAME)
-        if os.path.exists(dir_path):
-            files = [f for f in os.listdir(dir_path) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
-            return files if files else default_sounds
-        return default_sounds
+    # 1. Fetch all physical files on disk
+    dir_path = utils.full_path(SOUNDS_DIR_NAME)
+    disk_files = []
+    if os.path.exists(dir_path):
+        disk_files = [f for f in os.listdir(dir_path) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
 
-    guild_records = database.get_guild_sounds(str(guild_id))
-    guild_filenames = [r["filename"] for r in guild_records if r.get("filename")]
+    # 2. Fetch database records for this guild
+    db_filenames = []
+    if guild_id:
+        guild_records = database.get_guild_sounds(str(guild_id))
+        db_filenames = [r["filename"] for r in guild_records if r.get("filename")]
 
-    # Combine server custom sounds + default starter sounds
-    combined = list(dict.fromkeys(guild_filenames + default_sounds))
-    return combined
+    # Combine physical files + db records + default starter sounds (deduplicated)
+    combined = list(dict.fromkeys(db_filenames + disk_files + default_sounds))
+    return sorted(combined)
 
 def get_random_sound_for_guild(guild_id: str = None) -> str:
     sounds = get_guild_sound_library(guild_id)
@@ -327,7 +328,6 @@ async def handle_goal_webhook(request):
         except Exception as e:
             return web.json_response({"error": f"Failed to connect to voice: {e}"}, status=500)
 
-    # Play sound from the active server's soundboard library
     sound_to_play = data.get("sound") or get_random_sound_for_guild(guild_id)
     success = play_sound_in_vc(voice_client, sound_to_play)
     if success:
