@@ -245,47 +245,47 @@
     <section id="commands" class="section commands-section">
         <div class="container">
             <div class="section-header">
-                <h2 class="section-title">Discord <span class="gradient-text">Slash Commands</span></h2>
-                <p class="section-subtitle">Manage your soundboard library, voice connections, and server stats.</p>
+                <h2 class="section-title">Discord <span class="gradient-text">Commands</span></h2>
+                <p class="section-subtitle">Manage your soundboard library, voice connections, and server stats using the <code>&gt;</code> prefix.</p>
             </div>
 
             <div class="command-search-box">
-                <input type="text" id="cmd-search" placeholder="🔍 Search commands (e.g. /upload, /link, /list, /play)..." oninput="filterCommands()">
+                <input type="text" id="cmd-search" placeholder="🔍 Search commands (e.g. >upload, >link, >list, >play)..." oninput="filterCommands()">
             </div>
 
             <div class="commands-grid" id="commands-container">
                 <div class="cmd-card glass-card">
-                    <span class="cmd-name">/link</span>
+                    <span class="cmd-name">&gt;link</span>
                     <p class="cmd-desc">Generate your 6-digit code to pair your BakkesMod plugin with your Discord account.</p>
                     <span class="cmd-badge">Pairing</span>
                 </div>
 
                 <div class="cmd-card glass-card">
-                    <span class="cmd-name">/upload &lt;file&gt;</span>
+                    <span class="cmd-name">&gt;upload &lt;file&gt;</span>
                     <p class="cmd-desc">Upload a custom audio file (.mp3, .wav, .ogg) to the goal soundboard. Automatically normalizes to -14 LUFS.</p>
                     <span class="cmd-badge">Sound Management</span>
                 </div>
 
                 <div class="cmd-card glass-card">
-                    <span class="cmd-name">/list</span>
+                    <span class="cmd-name">&gt;list</span>
                     <p class="cmd-desc">List all available sounds currently loaded in the soundboard library.</p>
                     <span class="cmd-badge">Sound Management</span>
                 </div>
 
                 <div class="cmd-card glass-card">
-                    <span class="cmd-name">/play [name]</span>
+                    <span class="cmd-name">&gt;play [name]</span>
                     <p class="cmd-desc">Manually trigger a specific sound or a random sound in the voice channel.</p>
                     <span class="cmd-badge">Play</span>
                 </div>
 
                 <div class="cmd-card glass-card">
-                    <span class="cmd-name">/join</span>
+                    <span class="cmd-name">&gt;join</span>
                     <p class="cmd-desc">Connect RLScoreBot to your current Discord voice channel for goal celebrations.</p>
                     <span class="cmd-badge">Voice</span>
                 </div>
 
                 <div class="cmd-card glass-card">
-                    <span class="cmd-name">/stats</span>
+                    <span class="cmd-name">&gt;stats</span>
                     <p class="cmd-desc">Display server goal statistics and soundboard library counts.</p>
                     <span class="cmd-badge">Statistics</span>
                 </div>
@@ -311,13 +311,13 @@
                 <div class="setup-step-card glass-card">
                     <div class="step-badge">STEP 2</div>
                     <h3>Get Pairing Code</h3>
-                    <p>Type <code>/link</code> in your Discord server to generate your private 6-digit pairing key.</p>
+                    <p>Type <code>&gt;link</code> in your Discord server to generate your private 6-digit pairing key.</p>
                 </div>
 
                 <div class="setup-step-card glass-card">
                     <div class="step-badge">STEP 3</div>
                     <h3>Paste in BakkesMod</h3>
-                    <p>Paste the code into the BakkesMod plugin menu in Rocket League. Upload custom sounds with <code>/upload</code> and score!</p>
+                    <p>Paste the code into the BakkesMod plugin menu in Rocket League. Upload custom sounds with <code>&gt;upload</code> and score!</p>
                 </div>
             </div>
         </div>
