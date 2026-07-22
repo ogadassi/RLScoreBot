@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  rlscorebot:
+    build: .
+    container_name: rlscorebot_cloud
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - OWNER_ID=${OWNER_ID}
+      - PORT=8080
+    volumes:
+      - ./sounds:/app/sounds
+      - ./rlscorebot.db:/app/rlscorebot.db

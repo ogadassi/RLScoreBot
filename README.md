@@ -1,105 +1,89 @@
-# RLScoreBot - Rocket League Goal Scorer Bot
+# ⚡ RLScoreBot — Custom Goal Anthems for Rocket League
 
-This is a Python-based Discord bot that watches your Rocket League gameplay and automatically plays a sound effect in your voice channel whenever a goal is scored.
+[![Release](https://img.shields.io/badge/release-v2.0.0--cloud-00f0ff.svg)](https://github.com/ogadassi/RLScoreBot/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](LICENSE)
+[![Discord API](https://img.shields.io/badge/Discord-Slash%20Commands-5865F2.svg)](https://discord.com/developers/docs)
+[![BakkesMod](https://img.shields.io/badge/BakkesMod-Telemetry-green.svg)](https://www.bakkesmod.com/)
 
-## How It Works
+**RLScoreBot** is a 24/7 Cloud-Hosted Discord Bot & 2026 Web Application that plays **custom uploaded goal celebration anthems** in your Discord Voice Channel whenever you score in Rocket League!
 
-The bot uses **Computer Vision** to "see" what is on your screen.
+> 📜 **Looking for the legacy v1.0 Standalone Desktop version (Computer Vision / PyWin32)?**  
+> Check out the [v1.0.0-desktop Release](https://github.com/ogadassi/RLScoreBot/releases/tag/v1.0.0-desktop) or switch to the [`legacy/desktop-cv`](https://github.com/ogadassi/RLScoreBot/tree/legacy/desktop-cv) branch.
 
-1.  It periodically takes a screenshot of the top center of your screen (where the score is).
-2.  It processes the image to make it easier to read (converting to black and white).
-3.  It compares the current score image to the previous one.
-4.  If the score changes effectively (meaning a goal happened), it joins your voice channel and plays a random sound file.
+---
 
-## Prerequisites
+## 🚀 Key Features
 
-- Windows OS (Required for `win32gui` screen capture)
-- Python 3.8+
-- Rocket League (Game must be running in specific resolution, default 1920x1080)
-- `ffmpeg` installed and available in the project folder (included)
+* 🎵 **User-Uploaded Custom Anthems**: Every player can upload their own custom sound clips (`/upload`). When **Player A** scores, **Player A's custom anthem** plays! When **Player B** scores, **Player B's custom anthem** plays!
+* 🎚️ **-14 LUFS Audio Normalization Engine**: Every user-uploaded sound file (`.mp3`, `.wav`, `.ogg`, `.flac`) is automatically processed with `ffmpeg` to match standard broadcasting loudness (-14 LUFS).
+* 🔌 **Zero-Friction BakkesMod Telemetry**: A silent C++ BakkesMod plugin catches goal events in Rocket League memory with **0% CPU/GPU overhead** and pings the cloud bot.
+* 🌐 **2026 Gaming Web Application**: Embedded web interface featuring an interactive soundboard preview, command search explorer, and 1-click Discord invite generator.
+* 🐳 **Docker & Cloud Ready**: Fully containerized with `Dockerfile` and `docker-compose.yml` for 1-click deployment on free cloud tiers (Oracle Cloud, Koyeb, Render).
 
-## Installation
+---
 
-1.  **Install Python Dependencies**:
-    Open a terminal in this folder and run:
+## 🏗️ System Architecture
 
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-2.  **Discord Bot Setup**:
-
-    - Go to the [Discord Developer Portal](https://discord.com/developers/applications).
-    - Create a new Application and add a Bot.
-    - Copy the **Token**.
-    - Enable **Message Content Intent** in the bot settings.
-    - Invite the bot to your server using the OAuth2 URL generator (checking "Bot", "Manage Messages" (for uploads), "Connect", "Speak").
-
-3.  **Configuration**:
-    - Create a file named `.env` in this folder.
-    - Add your token and owner ID:
-      ```env
-      DISCORD_TOKEN=your_token_here_do_not_share
-      OWNER_ID=your_discord_user_id
-      ```
-
-## Usage
-
-### 🚀 Running with Auto-Start (Recommended)
-You can configure the bot to automatically monitor Rocket League in the background and launch the bot window only when the game is running.
-
-1. **Register the Watcher**:
-   Open a terminal in this folder and run:
-   ```bash
-   python install_autostart.py
-   ```
-   This registers `rl_watcher.py` to start silently on Windows login.
-2. **How it works**:
-   - The watcher runs invisibly in the background.
-   - When Rocket League starts, the watcher launches the Discord bot in a visible PowerShell window.
-   - When Rocket League closes, the bot gracefully exits.
-3. **To uninstall**:
-   ```bash
-   python install_autostart.py --uninstall
-   ```
-
-### 💻 Running Manually
-If you want to run the bot manually without the automatic game watcher:
-```bash
-python RLScoreBot.py
+```
+ ┌─────────────────────────┐               ┌─────────────────────────────────┐               ┌─────────────────────────┐
+ │   Gamer's PC (RL)       │               │      Cloud Server (24/7)        │               │   Friends' Discord VC   │
+ │                         │               │                                 │               │                         │
+ │  BakkesMod Plugin       │──HTTP Webhook─►  FastAPI / aiohttp Web Endpoint  │               │  Bot joins VC & plays   │
+ │  (Detects Goal Event)   │   (/api/goal) │                │                │──Voice Audio─►│  Player's Custom Anthem │
+ └─────────────────────────┘               │  Discord Bot (discord.py)       │               └─────────────────────────┘
+                                           └─────────────────────────────────┘
+                                                            ▲
+                                                            │ Serves Web App
+                                           ┌────────────────┴────────────────┐
+                                           │  2026 Gaming Website / Landing  │
+                                           │  • 1-Click Discord Invite       │
+                                           │  • Custom Sound Test & Upload   │
+                                           │  • Live Command List & Stats    │
+                                           └─────────────────────────────────┘
 ```
 
-## Discord Commands
+---
 
-### 🔊 Voice & Detection
-- `>join` — Join your current voice channel and start goal detection.
-- `>leave` — Leave the voice channel and stop detection.
-- `>play [id]` — Play a random sound or specify an ID from `>list`.
-- 🔒 `>restart` — Restart the bot (owner only).
+## 🤖 Discord Slash Commands
 
-### 🎵 Sound Management
-- `>list` — List all loaded sounds with their IDs.
-- `>upload <name>` — Upload a new sound (attach audio file: `.mp3`, `.wav`, `.ogg`, `.flac`, `.m4a`) — auto-normalizes.
-- 🔒 `>delete <id>` — Delete a sound by its ID (owner only).
-- `>refresh` — Reload sounds from disk.
-- 🔒 `>normalize` — Normalize all sounds to -14 LUFS (owner only).
+| Command | Description |
+| :--- | :--- |
+| `/link` | Generate a private 6-digit code to pair your BakkesMod plugin with Discord. |
+| `/upload <file>` | Upload a custom goal celebration anthem (auto-normalized to -14 LUFS). |
+| `/sound [name]` | Set your active goal anthem from your uploaded library or default starters. |
+| `/my_sounds` | List all custom goal anthems uploaded by you. |
+| `/join` | Connect RLScoreBot to your current Discord voice channel. |
+| `/leave` | Disconnect RLScoreBot from voice channel. |
+| `/stats` | Display server goal leaderboards and play counts. |
 
-### 🛠️ Utilities
-- `>commands` / `>cmds` / `>help` — Show the visually pretty command list embed.
-- `>stats` — Show play stats, total goals scored, and the top 10 most played sounds leaderboard.
-- 🔒 `>status_sync` — Manually trigger an LLM-generated status update from random general chat history (owner only).
-- 🔒 `>test` — Run a full self-test of bot systems and report pass/fail status (owner only).
+---
 
-*Note: Commands marked with 🔒 are restricted to the account configured in `OWNER_ID`.*
+## ⚡ Quick Setup Guide
 
-## Troubleshooting
+1. **Add Bot to Discord**: Click the 1-click invite link on the website or Developer Portal.
+2. **Pair Game**: Type `/link` in Discord to get your 6-digit code. Paste it into the BakkesMod plugin settings (**F2** menu in Rocket League).
+3. **Upload Your Anthem**: Attach a sound clip using `/upload <file>` and set it with `/sound`.
+4. **Score & Celebrate!** Join a voice channel with `/join` and play Rocket League!
 
-- **Bot doesn't detect goals**: Ensure Rocket League is running in focus. The bot currently scales to standard resolutions but expects a 16:9 aspect ratio matching 1920x1080 UI layout.
-- **FFmpeg error**: Ensure `ffmpeg.exe` is in the project folder.
-- **Auto-Start issues**: Run `python install_autostart.py --status` to verify if the watcher is correctly registered in HKCU registry.
+---
 
-## Developer Info
-- `rl_watcher.py`: Silent monitor process that spawns the bot console on game start.
-- `logger.py`: Provides colorized terminal logging output.
-- `score_detector.py`: Computer Vision module using PIL image comparison to detect score progression.
+## 🐳 Self-Hosting with Docker
 
+```bash
+# 1. Clone the repository
+git clone https://github.com/ogadassi/RLScoreBot.git
+cd RLScoreBot
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your DISCORD_TOKEN and OWNER_ID
+
+# 3. Launch Docker Container
+docker-compose up -d
+```
+
+---
+
+## 📄 License & Credits
+
+Distributed under the **MIT License**. Created by [ogadassi](https://github.com/ogadassi).

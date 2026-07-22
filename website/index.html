@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RLScoreBot — Custom Goal Anthems for Rocket League</title>
+    <meta name="description" content="Automated Rocket League goal celebration bot for Discord. Upload your own custom goal anthem and celebrate every score instantly with your squad.">
+    <meta property="og:title" content="RLScoreBot — Your Goals. Your Anthem.">
+    <meta property="og:description" content="Automated custom goal soundboard bot for Rocket League. Powered by BakkesMod telemetry and 24/7 cloud Discord audio.">
+    <meta property="og:image" content="/logo.png">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800;900&family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Ambient Background Glows -->
+    <div class="glow-bg glow-cyan"></div>
+    <div class="glow-bg glow-orange"></div>
+    <div class="glow-bg glow-violet"></div>
+
+    <!-- Navigation Header -->
+    <header class="navbar">
+        <div class="container nav-container">
+            <a href="#" class="brand-logo">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">RLScore<span class="highlight">Bot</span></span>
+            </a>
+            
+            <nav class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#soundboard">Sound Studio</a>
+                <a href="#pipeline">How It Works</a>
+                <a href="#commands">Commands</a>
+                <a href="#setup">Setup Guide</a>
+            </nav>
+
+            <div class="nav-actions">
+                <a href="https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=3145728&scope=bot%20applications.commands" id="invite-btn-nav" class="btn btn-glow btn-primary">
+                    <span class="btn-icon">🤖</span> Add to Discord
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container hero-container">
+            <div class="hero-content">
+                <div class="badge-pill">
+                    <span class="badge-dot"></span> 2026 Cloud Edition • BakkesMod Telemetry
+                </div>
+                <h1 class="hero-title">Your Goals.<br><span class="gradient-text">Your Anthem.</span></h1>
+                <p class="hero-description">
+                    The ultimate automated Rocket League soundboard bot for Discord. Every time you score in-game, RLScoreBot instantly joins your voice channel and plays your <strong>custom uploaded goal anthem</strong> to celebrate with your squad.
+                </p>
+
+                <div class="hero-cta-group">
+                    <a href="https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=3145728&scope=bot%20applications.commands" id="invite-btn-hero" class="btn btn-hero btn-primary">
+                        <span>🤖 Add to Discord</span>
+                    </a>
+                    <a href="#setup" class="btn btn-hero btn-secondary">
+                        <span>⚡ Get BakkesMod Plugin</span>
+                    </a>
+                </div>
+
+                <!-- Stats Strip -->
+                <div class="stats-strip">
+                    <div class="stat-item">
+                        <span class="stat-val" id="stat-goals">12,480+</span>
+                        <span class="stat-lbl">Goals Celebrated</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <span class="stat-val" id="stat-servers">350+</span>
+                        <span class="stat-lbl">Active Servers</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <span class="stat-val">100%</span>
+                        <span class="stat-lbl">Instant Telemetry</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hero Interactive Mockup -->
+            <div class="hero-visual">
+                <div class="discord-card-glass">
+                    <div class="card-header">
+                        <span class="status-indicator"></span>
+                        <span class="channel-title">🔊 Squad VC #1 — Rocket League</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="user-pill active-speaker">
+                            <div class="avatar avatar-1">OG</div>
+                            <div class="user-info">
+                                <span class="username">Ohad (Scored Goal!)</span>
+                                <span class="user-status">GOAL ANTHEM PLAYING 🎵</span>
+                            </div>
+                            <div class="waveform-anim">
+                                <span></span><span></span><span></span><span></span>
+                            </div>
+                        </div>
+
+                        <div class="user-pill">
+                            <div class="avatar avatar-bot">RL</div>
+                            <div class="user-info">
+                                <span class="username">RLScoreBot <span class="bot-tag">BOT</span></span>
+                                <span class="user-status">Playing: custom_anthem.mp3</span>
+                            </div>
+                        </div>
+
+                        <div class="user-pill">
+                            <div class="avatar avatar-2">TM</div>
+                            <div class="user-info">
+                                <span class="username">Teammate</span>
+                                <span class="user-status">"WHAT A SAVE!"</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <span>LUFS Level: -14.0 dB</span>
+                        <span>Latency: &lt;15ms</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Interactive Sound Studio Section -->
+    <section id="soundboard" class="section sound-studio">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Custom Goal Anthem <span class="gradient-text">Studio</span></h2>
+                <p class="section-subtitle">Test default example anthems or drop your own audio file to test live volume normalization.</p>
+            </div>
+
+            <div class="sound-grid">
+                <!-- Example Sound 1 -->
+                <div class="sound-card glass-card" onclick="playSound('default_cheer.mp3', 'Default Stadium Cheer')">
+                    <div class="sound-icon">🎉</div>
+                    <div class="sound-info">
+                        <h3>Default Stadium Cheer</h3>
+                        <span class="sound-tag">Starter Anthem #1</span>
+                    </div>
+                    <button class="play-btn">▶ Play</button>
+                </div>
+
+                <!-- Example Sound 2 -->
+                <div class="sound-card glass-card" onclick="playSound('default_airhorn.mp3', 'Default Hype Airhorn')">
+                    <div class="sound-icon">🎺</div>
+                    <div class="sound-info">
+                        <h3>Default Hype Airhorn</h3>
+                        <span class="sound-tag">Starter Anthem #2</span>
+                    </div>
+                    <button class="play-btn">▶ Play</button>
+                </div>
+
+                <!-- Interactive Upload Tester -->
+                <div class="sound-card glass-card upload-card">
+                    <div class="sound-icon">📥</div>
+                    <div class="sound-info">
+                        <h3>Test Your Own Anthem</h3>
+                        <span class="sound-tag">Upload .mp3, .wav, .ogg, .flac</span>
+                    </div>
+                    <input type="file" id="sound-upload-input" accept="audio/*" style="display: none;">
+                    <button class="btn btn-secondary btn-sm" onclick="document.getElementById('sound-upload-input').click()">📁 Choose File</button>
+                </div>
+            </div>
+
+            <!-- Live Active Sound Visualizer Bar -->
+            <div class="now-playing-bar glass-card hidden" id="now-playing-bar">
+                <div class="np-info">
+                    <span class="np-label">NOW PREVIEWING:</span>
+                    <span class="np-title" id="np-title">None</span>
+                </div>
+                <div class="visualizer-bars">
+                    <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                </div>
+                <button class="stop-btn" onclick="stopAudio()">⏹ Stop</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works / Telemetry Pipeline -->
+    <section id="pipeline" class="section pipeline-section">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Zero Friction <span class="gradient-text">Architecture</span></h2>
+                <p class="section-subtitle">How goal signals flow instantly from your PC to Discord without impacting game performance.</p>
+            </div>
+
+            <div class="pipeline-flow">
+                <div class="pipe-card glass-card">
+                    <div class="step-num">01</div>
+                    <div class="pipe-icon">⚽</div>
+                    <h3>Score in Rocket League</h3>
+                    <p>You score a goal in any online Casual, Ranked, or Tournament match.</p>
+                </div>
+
+                <div class="pipe-arrow">➔</div>
+
+                <div class="pipe-card glass-card">
+                    <div class="step-num">02</div>
+                    <div class="pipe-icon">🔌</div>
+                    <h3>BakkesMod Telemetry</h3>
+                    <p>The silent 1-click C++ plugin catches the goal event instantly in memory.</p>
+                </div>
+
+                <div class="pipe-arrow">➔</div>
+
+                <div class="pipe-card glass-card">
+                    <div class="step-num">03</div>
+                    <div class="pipe-icon">☁️</div>
+                    <h3>Cloud Engine</h3>
+                    <p>Our 24/7 server receives the ping and finds your Discord voice channel.</p>
+                </div>
+
+                <div class="pipe-arrow">➔</div>
+
+                <div class="pipe-card glass-card">
+                    <div class="step-num">04</div>
+                    <div class="pipe-icon">🔊</div>
+                    <h3>Custom Goal Anthem!</h3>
+                    <p>Bot joins your VC in &lt;15ms and plays your custom anthem at -14 LUFS.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Commands Explorer -->
+    <section id="commands" class="section commands-section">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Discord <span class="gradient-text">Slash Commands</span></h2>
+                <p class="section-subtitle">Control your personal anthem library, voice connections, and server stats.</p>
+            </div>
+
+            <div class="command-search-box">
+                <input type="text" id="cmd-search" placeholder="🔍 Search commands (e.g. /upload, /link, /sound)..." oninput="filterCommands()">
+            </div>
+
+            <div class="commands-grid" id="commands-container">
+                <div class="cmd-card glass-card">
+                    <span class="cmd-name">/link</span>
+                    <p class="cmd-desc">Generate your 6-digit code to pair your BakkesMod plugin with your Discord account.</p>
+                    <span class="cmd-badge">Pairing</span>
+                </div>
+
+                <div class="cmd-card glass-card">
+                    <span class="cmd-name">/upload &lt;file&gt;</span>
+                    <p class="cmd-desc">Upload a custom audio file (.mp3, .wav, .ogg). Automatically normalizes to -14 LUFS.</p>
+                    <span class="cmd-badge">Sound Management</span>
+                </div>
+
+                <div class="cmd-card glass-card">
+                    <span class="cmd-name">/sound [name]</span>
+                    <p class="cmd-desc">Set your active personal goal celebration anthem from your uploaded library or defaults.</p>
+                    <span class="cmd-badge">Sound Management</span>
+                </div>
+
+                <div class="cmd-card glass-card">
+                    <span class="cmd-name">/my_sounds</span>
+                    <p class="cmd-desc">List all custom sounds uploaded by you with their IDs and LUFS volume status.</p>
+                    <span class="cmd-badge">Library</span>
+                </div>
+
+                <div class="cmd-card glass-card">
+                    <span class="cmd-name">/join</span>
+                    <p class="cmd-desc">Connect RLScoreBot to your current Discord voice channel for goal detection.</p>
+                    <span class="cmd-badge">Voice</span>
+                </div>
+
+                <div class="cmd-card glass-card">
+                    <span class="cmd-name">/stats</span>
+                    <p class="cmd-desc">Display server goal leaderboards, top player anthems, and goal statistics.</p>
+                    <span class="cmd-badge">Statistics</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Setup Guide Modal / Section -->
+    <section id="setup" class="section setup-section">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">3-Step <span class="gradient-text">Setup Guide</span></h2>
+                <p class="section-subtitle">Get your custom goal anthem running in less than 60 seconds.</p>
+            </div>
+
+            <div class="setup-steps">
+                <div class="setup-step-card glass-card">
+                    <div class="step-badge">STEP 1</div>
+                    <h3>Add Bot to Discord</h3>
+                    <p>Click the <strong>Add to Discord</strong> button above to invite RLScoreBot to your gaming server.</p>
+                </div>
+
+                <div class="setup-step-card glass-card">
+                    <div class="step-badge">STEP 2</div>
+                    <h3>Get Pairing Code</h3>
+                    <p>Type <code>/link</code> in your Discord server to generate your private 6-digit pairing key.</p>
+                </div>
+
+                <div class="setup-step-card glass-card">
+                    <div class="step-badge">STEP 3</div>
+                    <h3>Paste in BakkesMod</h3>
+                    <p>Paste the code into the BakkesMod plugin menu in Rocket League. Upload your anthem with <code>/upload</code> and score!</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container footer-container">
+            <div class="footer-brand">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">RLScore<span class="highlight">Bot</span></span>
+                <p>© 2026 RLScoreBot Team • Open Source Gaming Platform</p>
+            </div>
+            <div class="footer-links">
+                <a href="https://github.com/ogadassi/RLScoreBot" target="_blank">GitHub Repository</a>
+                <a href="#setup">Setup Guide</a>
+                <a href="https://github.com/ogadassi/RLScoreBot/releases/tag/v1.0.0-desktop" target="_blank">v1.0 Desktop Version</a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Audio Player Object -->
+    <audio id="audio-player"></audio>
+
+    <!-- App JavaScript -->
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,8 +1,7 @@
-discord.py
+discord.py>=2.3.0
 colorama
-
 Pillow
-pywin32
 python-dotenv
 requests
 PyNaCl
+aiohttp
