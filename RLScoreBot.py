@@ -793,7 +793,7 @@ async def generate_status_from_chat(chat_text: str, api_key: str) -> str:
         logger.warn("Gemini API key is missing. Cannot generate status.")
         return None
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={api_key}"
     payload = {
         "contents": [{
             "parts": [{
