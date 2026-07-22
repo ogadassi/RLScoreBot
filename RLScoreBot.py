@@ -9,7 +9,7 @@ import functools
 import cv2
 import numpy as np
 from PIL import ImageGrab
-from datetime import datetime as _dt, timezone
+from datetime import datetime as _dt, timezone, timedelta
 import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
@@ -117,6 +117,13 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix=">", intents=intents, help_command=None)
 
+# ── State flags ───────────────────────────────────────────────────────────────
+# Set True only when the owner runs >leave — prevents auto-rejoin until RL
+# restarts. Automatically cleared on the next RL launch detection.
+bot._manual_leave    = False
+bot._rl_was_running  = False   # tracks previous RL running state
+bot._is_connecting   = False   # prevents overlapping connect attempts
+
 def is_rl_running():
     try:
         cmd = 'tasklist /FI "IMAGENAME eq RocketLeague.exe" /FO CSV /NH'
@@ -191,12 +198,13 @@ async def help_cmd(ctx):
         value="[Owner] Run diagnostic self-test",
         inline=False,
     )
-    embed.set_footer(text="Prefix: >  |  RLScoreBot v2.0")
+    embed.set_footer(text="Prefix: >  |  RLScoreBot Desktop")
     await ctx.send(embed=embed)
 
 
 @bot.command(name="join", help="Join your voice channel and start score detection")
 async def join_cmd(ctx):
+    # Manual join clears the manual-leave flag so auto-rejoin works again
     bot._manual_leave = False
     if not ctx.author.voice or not ctx.author.voice.channel:
         await ctx.send("❌ You need to be in a voice channel first!")
@@ -206,6 +214,9 @@ async def join_cmd(ctx):
     voice_client = ctx.guild.voice_client
 
     if voice_client and voice_client.is_connected():
+        if voice_client.channel.id == channel.id:
+            await ctx.send(f"✅ Already in **{channel.name}**.")
+            return
         await voice_client.move_to(channel)
         logger.info(f"Moved to voice channel: {channel.name}")
     else:
@@ -422,6 +433,9 @@ async def test_cmd(ctx):
     else:
         results.append(("⚠️", "Owner ID configuration", "OWNER_ID not set in .env. Owner-only commands disabled."))
 
+    rl_running = is_rl_running()
+    results.append(("✅" if rl_running else "⚠️", "Rocket League running", "Detected" if rl_running else "Not detected"))
+
     voice_client = ctx.guild.voice_client
     if voice_client and voice_client.is_connected():
         results.append(("✅", "Voice connection", f"Connected to **{voice_client.channel.name}**"))
@@ -599,20 +613,28 @@ async def fetch_random_chat_history(guild):
         if channel.name.lower() == "general":
             general_channel = channel
             break
-            
+
     if not general_channel:
-        logger.warn("Could not find 'general' channel to fetch status history.")
+        # Fallback: use the first readable text channel
+        for channel in guild.text_channels:
+            perms = channel.permissions_for(guild.me)
+            if perms.read_messages and perms.read_message_history:
+                general_channel = channel
+                break
+
+    if not general_channel:
+        logger.warn("Could not find any readable text channel for status history.")
         return None
 
     try:
         start_date = general_channel.created_at
         now = _dt.now(timezone.utc)
-        
+
         delta = now - start_date
         if delta.total_seconds() <= 0:
-            logger.warn("General channel has no valid age/history.")
+            logger.warn("Channel has no valid age/history.")
             return None
-            
+
         random_seconds = random.randint(0, max(1, int(delta.total_seconds())))
         random_time = start_date + timedelta(seconds=random_seconds)
 
@@ -621,14 +643,14 @@ async def fetch_random_chat_history(guild):
             if msg.author.bot or not msg.content.strip():
                 continue
             messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
-            
+
         if not messages:
             async for msg in general_channel.history(limit=50):
                 if msg.author.bot or not msg.content.strip():
                     continue
                 messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
             messages.reverse()
-                
+
         return "\n".join(messages)
     except Exception as e:
         logger.error(f"Error fetching random chat history: {e}")
@@ -667,12 +689,12 @@ async def generate_status_from_chat(chat_text: str, api_key: str) -> str:
                     if not candidates:
                         logger.warn("Gemini returned no status candidates.")
                         return None
-                        
+
                     candidate = candidates[0]
                     content = candidate.get('content')
                     if not content or not content.get('parts'):
                         return None
-                        
+
                     status_text = content['parts'][0]['text'].strip()
                     lines = [l.strip().lstrip('*').lstrip('>').strip() for l in status_text.splitlines() if l.strip()]
                     clean_text = lines[0] if lines else status_text
@@ -706,7 +728,7 @@ async def update_bot_status(guild):
 
     activity = discord.CustomActivity(name=status_text)
     await bot.change_presence(activity=activity)
-    logger.success(f"Custom status updated to: \"{status_text}\"")
+    logger.success(f'Custom status updated to: "{status_text}"')
     return status_text
 
 
@@ -718,44 +740,110 @@ async def auto_status_loop():
             break
 
 
-@tasks.loop(seconds=1)
+# ── Game Monitor Loop ─────────────────────────────────────────────────────────
+
+@tasks.loop(seconds=2)
 async def monitor_game_status():
-    """Gracefully shuts down the bot if Rocket League isn't running (with a 60s startup grace period)."""
-    if not is_rl_running():
-        now = _dt.now()
-        uptime = now - _bot_start_time
-        if getattr(monitor_game_status, "_seen_running", False) or uptime.total_seconds() > 60:
-            logger.warn("Rocket League is not running. Shutting down bot gracefully...")
-            voice_client = discord.utils.get(bot.voice_clients)
-            if voice_client and voice_client.is_connected():
-                try:
-                    await voice_client.disconnect(force=True)
-                except Exception:
-                    pass
-            await asyncio.sleep(0.5)
-            await bot.close()
-            import sys
-            sys.exit(2)
-    else:
-        monitor_game_status._seen_running = True
-        
-        if not getattr(bot, "_manual_leave", False) and not getattr(monitor_game_status, "_is_connecting", False):
-            if not any(vc.is_connected() for vc in bot.voice_clients):
-                for guild in bot.guilds:
-                    owner = guild.get_member(OWNER_ID)
-                    if owner and owner.voice and owner.voice.channel:
-                        monitor_game_status._is_connecting = True
-                        try:
-                            await owner.voice.channel.connect(reconnect=False)
-                            logger.success(f"Auto-joined voice channel: {owner.voice.channel.name}")
-                            if not check_goal.is_running():
-                                check_goal.start(guild)
-                                logger.info("Goal detection loop started automatically.")
-                        except Exception as e:
-                            logger.error(f"Failed to auto-join: {e}")
-                        finally:
-                            monitor_game_status._is_connecting = False
-                        break
+    """
+    Watches RocketLeague.exe:
+    - When RL starts: auto-join the owner's VC and start goal detection.
+    - When RL stops: stop goal detection, disconnect VC, and exit.
+
+    Edge cases handled:
+    - 60-second startup grace period (bot may launch before RL is detected).
+    - _manual_leave: respects >leave command during a session, but resets on
+      the next RL launch so the bot rejoins automatically next game.
+    - _is_connecting: prevents overlapping connect() coroutines.
+    - If owner switches VC while bot is already connected, bot follows.
+    """
+    rl_running = is_rl_running()
+
+    # ── RL just stopped ───────────────────────────────────────────────────────
+    if not rl_running and bot._rl_was_running:
+        logger.warn("Rocket League closed. Shutting down bot gracefully...")
+        bot._rl_was_running = False
+
+        if check_goal.is_running():
+            check_goal.stop()
+
+        voice_client = discord.utils.get(bot.voice_clients)
+        if voice_client and voice_client.is_connected():
+            try:
+                await voice_client.disconnect(force=True)
+                logger.info("Disconnected from voice channel on RL shutdown.")
+            except Exception:
+                pass
+
+        await asyncio.sleep(0.5)
+        await bot.close()
+        import sys
+        sys.exit(2)
+
+    # ── Startup grace period: don't act on "not running" before we've ever seen RL
+    uptime = (_dt.now() - _bot_start_time).total_seconds()
+    if not rl_running and not bot._rl_was_running and uptime < 60:
+        return
+
+    # ── RL not running and grace period expired → shutdown
+    if not rl_running and not bot._rl_was_running:
+        logger.warn("Rocket League was never detected within 60s of bot start. Shutting down.")
+        await bot.close()
+        import sys
+        sys.exit(2)
+
+    # ── RL is running ─────────────────────────────────────────────────────────
+    if rl_running:
+        # First time we detect RL this run: clear the manual-leave flag so the
+        # bot auto-joins fresh each RL launch.
+        if not bot._rl_was_running:
+            logger.info("Rocket League detected. Auto-join enabled.")
+            bot._rl_was_running = True
+            bot._manual_leave   = False   # reset so new session auto-joins
+
+        # Don't try to join if the owner manually left or we're mid-connect
+        if bot._manual_leave or bot._is_connecting:
+            return
+
+        for guild in bot.guilds:
+            owner = guild.get_member(OWNER_ID)
+            if not owner:
+                continue
+
+            current_vc = guild.voice_client
+
+            # Owner is not in any VC right now
+            if not owner.voice or not owner.voice.channel:
+                continue
+
+            owner_channel = owner.voice.channel
+
+            # Bot is already in the correct channel — nothing to do
+            if current_vc and current_vc.is_connected() and current_vc.channel.id == owner_channel.id:
+                # Make sure the goal loop is running
+                if not check_goal.is_running():
+                    check_goal.start(guild)
+                    logger.info("Goal detection loop restarted (was stopped).")
+                return
+
+            # Bot is in the wrong channel → follow the owner
+            bot._is_connecting = True
+            try:
+                if current_vc and current_vc.is_connected():
+                    await current_vc.move_to(owner_channel)
+                    logger.success(f"Followed owner to: {owner_channel.name}")
+                else:
+                    await owner_channel.connect(reconnect=True)
+                    logger.success(f"Auto-joined voice channel: {owner_channel.name}")
+
+                if not check_goal.is_running():
+                    check_goal.start(guild)
+                    logger.info("Goal detection loop started automatically.")
+            except Exception as e:
+                logger.error(f"Failed to auto-join/move: {e}")
+            finally:
+                bot._is_connecting = False
+            break  # only act on the first guild
+
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -765,6 +853,8 @@ async def on_voice_state_update(member, before, after):
             human_members = [m for m in vc.channel.members if not m.bot]
             if len(human_members) == 0:
                 logger.info(f"Voice channel #{vc.channel.name} is empty. Disconnecting...")
+                if check_goal.is_running():
+                    check_goal.stop()
                 try:
                     await vc.disconnect()
                 except Exception as e:
@@ -777,7 +867,7 @@ async def status_sync_cmd(ctx):
     await ctx.send("⏳ Sampling random historical chat history and calling Gemini AI...")
     status_text = await update_bot_status(ctx.guild)
     if status_text:
-        await ctx.send(f"✅ Status updated to: \"{status_text}\"")
+        await ctx.send(f'✅ Status updated to: "{status_text}"')
     else:
         await ctx.send("❌ Failed to update status. Check bot console logs for details.")
 
@@ -794,6 +884,7 @@ async def on_ready():
     if not monitor_game_status.is_running():
         monitor_game_status.start()
         logger.info("Game status monitor loop started.")
+
 
 async def main():
     if not DISCORD_TOKEN:
