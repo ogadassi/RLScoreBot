@@ -93,7 +93,8 @@ def play_sound(voice_client, sound_filename):
         logger.warn("No sound available to play.")
         return
     if voice_client.is_playing():
-        voice_client.stop()
+        logger.info("Already playing audio — goal skipped.")
+        return
     sound_path = utils.full_path(SOUNDS_DIR_NAME, sound_filename)
     if not os.path.isfile(sound_path):
         logger.error(f"Sound file missing: {sound_path}")
