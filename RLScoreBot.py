@@ -612,10 +612,7 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Failed to sync slash commands: {e}")
 
-    # Automatically generate status on boot
-    if bot.guilds:
-        await update_bot_status(bot.guilds[0])
-
+    # auto_status_loop fires automatically on startup once cleanly!
     if not auto_status_loop.is_running():
         auto_status_loop.start()
 
