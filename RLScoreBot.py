@@ -102,6 +102,23 @@ def get_random_sound_for_guild(guild_id: str = None) -> str:
     sounds = get_guild_sound_library(guild_id)
     return random.choice(sounds)
 
+def build_soundboard_embed(sounds: list[str], title_label: str) -> discord.Embed:
+    """Builds a multi-column Discord Embed displaying the ENTIRE soundboard library without cutoffs."""
+    embed = discord.Embed(title=title_label, color=discord.Color.purple())
+    
+    if not sounds:
+        embed.description = "No custom sounds uploaded yet."
+        return embed
+
+    chunk_size = 20
+    for i in range(0, len(sounds), chunk_size):
+        chunk = sounds[i:i + chunk_size]
+        field_name = f"Sounds ({i+1}–{min(i+chunk_size, len(sounds))} of {len(sounds)})"
+        field_val = "\n".join([f"• `{s}`" for s in chunk])
+        embed.add_field(name=field_name, value=field_val, inline=True)
+
+    return embed
+
 # ── Robust Gemini AI Status Generation Engine ───────────────────────────────
 async def fetch_random_chat_history(guild):
     candidate_channels = [
@@ -454,9 +471,7 @@ async def slash_upload(interaction: discord.Interaction, file: discord.Attachmen
 async def slash_list(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     sounds = get_guild_sound_library(str(interaction.guild_id))
-    embed = discord.Embed(title="🎧 Server Goal Celebration Soundboard", color=discord.Color.purple())
-    sound_lines = "\n".join([f"• `{s}`" for s in sounds[:30]])
-    embed.add_field(name=f"Server Loaded Sounds ({len(sounds)})", value=sound_lines or "No custom sounds uploaded yet.", inline=False)
+    embed = build_soundboard_embed(sounds, "🎧 Server Goal Celebration Soundboard")
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="play", description="Manually trigger a goal sound in the voice channel.")
@@ -505,9 +520,7 @@ async def cmd_upload(ctx, sound_name: str = None):
 @bot.command(name="list", help="List available sounds in this server's soundboard.")
 async def cmd_list(ctx):
     sounds = get_guild_sound_library(str(ctx.guild.id))
-    embed = discord.Embed(title="🎧 Server Goal Celebration Soundboard", color=discord.Color.purple())
-    sound_lines = "\n".join([f"• `{s}`" for s in sounds[:30]])
-    embed.add_field(name=f"Server Loaded Sounds ({len(sounds)})", value=sound_lines or "No custom sounds uploaded yet.", inline=False)
+    embed = build_soundboard_embed(sounds, "🎧 Server Goal Celebration Soundboard")
     await ctx.send(embed=embed)
 
 @bot.command(name="play", help="Manually trigger sound.")
