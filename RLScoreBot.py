@@ -178,10 +178,10 @@ async def generate_status_from_chat(chat_text: str, api_key: str) -> tuple[str, 
     Exact Legacy Prompting & Multi-Model Endpoint Fallback
     """
     models_to_try = [
-        "gemini-2.0-flash",
         "gemini-2.5-flash",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-pro-latest"
+        "gemini-2.0-flash",
+        "gemini-2.5-pro",
+        "gemini-1.5-pro"
     ]
 
     # Exact Legacy Prompt
