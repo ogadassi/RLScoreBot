@@ -82,13 +82,11 @@ def get_guild_sound_library(guild_id: str = None) -> list[str]:
     Returns server-specific uploaded sounds and physical disk sound files.
     No hardcoded default sounds.
     """
-    # 1. Physical files on disk
     dir_path = utils.full_path(SOUNDS_DIR_NAME)
     disk_files = []
     if os.path.exists(dir_path):
         disk_files = [f for f in os.listdir(dir_path) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
 
-    # 2. Database records for this guild
     db_filenames = []
     if guild_id:
         guild_records = database.get_guild_sounds(str(guild_id))
@@ -118,47 +116,67 @@ def build_soundboard_embed(sounds: list[str], title_label: str) -> discord.Embed
 
     return embed
 
-# ── Robust Gemini AI Status Generation Engine ───────────────────────────────
+# ── Elite Legacy Gemini AI Status Generation Engine ──────────────────────────
 async def fetch_random_chat_history(guild):
-    candidate_channels = [
-        c for c in guild.text_channels 
-        if c.permissions_for(guild.me).read_message_history and c.permissions_for(guild.me).read_messages
-    ]
+    """
+    Exact Legacy Algorithm:
+    Finds a text channel named 'general' in the guild, picks a random day/time, 
+    and returns up to 50 messages formatted as a chat log.
+    """
+    target_channel = None
+    for channel in guild.text_channels:
+        if channel.name.lower() == "general":
+            target_channel = channel
+            break
+            
+    if not target_channel:
+        candidate_channels = [c for c in guild.text_channels if c.permissions_for(guild.me).read_message_history]
+        if candidate_channels:
+            target_channel = candidate_channels[0]
+        else:
+            logger.warn("Could not find 'general' or readable channel to fetch status history.")
+            return None, "No readable text channel found."
 
-    if not candidate_channels:
-        logger.warn("No accessible text channels found in guild.")
-        return None, "No readable text channels found."
+    try:
+        start_date = target_channel.created_at # UTC timezone-aware
+        now = _dt.now(timezone.utc)
+        
+        delta = now - start_date
+        if delta.total_seconds() <= 0:
+            logger.warn("Target channel has no valid age/history.")
+            return None, "Channel history empty."
+            
+        random_seconds = random.randint(0, max(1, int(delta.total_seconds())))
+        random_time = start_date + timedelta(seconds=random_seconds)
 
-    random.shuffle(candidate_channels)
-
-    for channel in candidate_channels:
-        try:
-            created_at = channel.created_at
-            now = _dt.now(timezone.utc)
-            delta_days = (now - created_at).days
-
-            before_date = None
-            if delta_days > 3:
-                random_offset_days = random.randint(0, delta_days - 1)
-                before_date = now - timedelta(days=random_offset_days)
-
-            messages = []
-            async for msg in channel.history(limit=50, before=before_date):
+        messages = []
+        # Fetch up to 50 messages starting after the random time
+        async for msg in target_channel.history(limit=50, after=random_time):
+            if msg.author.bot or not msg.content.strip():
+                continue
+            messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
+            
+        if not messages:
+            # Fallback: just fetch the latest 50 messages if the random date was empty
+            async for msg in target_channel.history(limit=50):
                 if msg.author.bot or not msg.content.strip():
                     continue
                 messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
+            messages.reverse()
                 
-            if len(messages) >= 3:
-                logger.info(f"Sampled {len(messages)} historical messages from #{channel.name}")
-                sample_label = f"#{channel.name} ({'Random Archive' if before_date else 'Recent'})"
-                return "\n".join(reversed(messages)), sample_label
-        except Exception as e:
-            logger.warn(f"Could not sample channel #{channel.name}: {e}")
-            continue
+        if messages:
+            logger.info(f"Fetched {len(messages)} messages from #{target_channel.name}")
+            return "\n".join(messages), f"#{target_channel.name}"
+            
+        return None, "No text messages found in channel."
+    except Exception as e:
+        logger.error(f"Error fetching random chat history: {e}")
+        return None, str(e)
 
-    return None, "No text messages found in server history."
-
-async def generate_status_from_chat(chat_log: str, api_key: str) -> tuple[str, str]:
+async def generate_status_from_chat(chat_text: str, api_key: str) -> tuple[str, str]:
+    """
+    Exact Legacy Prompting & Multi-Model Endpoint Fallback
+    """
     models_to_try = [
         "gemini-2.0-flash",
         "gemini-2.5-flash",
@@ -166,11 +184,16 @@ async def generate_status_from_chat(chat_log: str, api_key: str) -> tuple[str, s
         "gemini-1.5-pro-latest"
     ]
 
+    # Exact Legacy Prompt
     prompt = (
-        "Below is a chat log from a Discord server's conversation. "
-        "Create a funny, short, iconic 1-sentence Discord status (under 100 characters) "
-        "that captures the vibe, humor, or inside jokes of the conversation. Output ONLY the status text.\n\n"
-        f"CHAT LOG:\n{chat_log}"
+        "Below is a segment of chat history from a Discord channel.\n"
+        "Generate a funny, concise custom status for a bot based on this chat.\n"
+        "Requirements:\n"
+        "1. Must be under 128 characters (extremely short and punchy).\n"
+        "2. Must sound like a custom status message (e.g. an activity, a funny quote, or a dry joke).\n"
+        "3. Absolutely do NOT wrap in quotation marks or prefix with 'Status:' or anything similar.\n"
+        "4. Output only the status text itself.\n\n"
+        f"Chat History:\n{chat_text}"
     )
 
     payload = {
@@ -182,17 +205,19 @@ async def generate_status_from_chat(chat_log: str, api_key: str) -> tuple[str, s
         for model in models_to_try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
-                async with session.post(url, json=payload, timeout=15) as response:
+                async with session.post(url, json=payload, timeout=30) as response:
                     if response.status == 200:
                         data = await response.json()
                         candidates = data.get('candidates', [])
                         if candidates and 'content' in candidates[0]:
                             parts = candidates[0]['content'].get('parts', [])
                             if parts:
-                                status_text = parts[0]['text'].strip().strip('"').strip("'")
+                                status_text = parts[0]['text'].strip()
+                                if (status_text.startswith('"') and status_text.endswith('"')) or (status_text.startswith("'") and status_text.endswith("'")):
+                                    status_text = status_text[1:-1].strip()
                                 return status_text[:120], f"Model {model}"
                     elif response.status == 429:
-                        last_error = f"Gemini API rate limited (HTTP 429). Please wait before requesting again."
+                        last_error = "Gemini API rate limited (HTTP 429). Please wait before requesting again."
                         logger.warn(last_error)
                     else:
                         err_text = await response.text()
