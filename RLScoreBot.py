@@ -190,10 +190,32 @@ def play_sound_in_vc(voice_client, sound_filename: str):
 
 # ── Embedded Web Server & Webhooks ────────────────────────────────────────────
 async def handle_index(request):
+    """Serve website landing page."""
     index_path = os.path.join(os.path.dirname(__file__), WEBSITE_DIR_NAME, "index.html")
     if os.path.exists(index_path):
         return web.FileResponse(index_path)
     return web.Response(text="<h1>RLScoreBot Cloud Engine Online</h1>", content_type="text/html")
+
+async def handle_style(request):
+    """Serve style.css directly with text/css content type."""
+    css_path = os.path.join(os.path.dirname(__file__), WEBSITE_DIR_NAME, "style.css")
+    if os.path.exists(css_path):
+        return web.FileResponse(css_path)
+    return web.Response(status=404)
+
+async def handle_app_js(request):
+    """Serve app.js directly with application/javascript content type."""
+    js_path = os.path.join(os.path.dirname(__file__), WEBSITE_DIR_NAME, "app.js")
+    if os.path.exists(js_path):
+        return web.FileResponse(js_path)
+    return web.Response(status=404)
+
+async def handle_logo(request):
+    """Serve logo.png directly."""
+    logo_path = os.path.join(os.path.dirname(__file__), WEBSITE_DIR_NAME, "logo.png")
+    if os.path.exists(logo_path):
+        return web.FileResponse(logo_path)
+    return web.Response(status=404)
 
 async def handle_goal_webhook(request):
     try:
@@ -247,19 +269,15 @@ async def handle_stats_api(request):
 
 def setup_web_routes(app):
     app.router.add_get("/", handle_index)
+    app.router.add_get("/style.css", handle_style)
+    app.router.add_get("/app.js", handle_app_js)
+    app.router.add_get("/logo.png", handle_logo)
     app.router.add_post("/api/v1/goal", handle_goal_webhook)
     app.router.add_get("/api/v1/stats", handle_stats_api)
     
-    website_dir = os.path.join(os.path.dirname(__file__), WEBSITE_DIR_NAME)
     sounds_dir = os.path.join(os.path.dirname(__file__), SOUNDS_DIR_NAME)
-
     if os.path.exists(sounds_dir):
         app.router.add_static("/sounds", sounds_dir)
-        
-    if os.path.exists(website_dir):
-        app.router.add_static("/style.css", website_dir)
-        app.router.add_static("/app.js", website_dir)
-        app.router.add_static("/logo.png", website_dir)
 
 # ── Discord Commands (Prefix >) ───────────────────────────────────────────────
 
