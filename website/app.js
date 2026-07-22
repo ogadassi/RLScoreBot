@@ -14,7 +14,7 @@ function playSound(filename, title) {
         npBar.classList.remove('hidden');
     }).catch(err => {
         console.warn("Audio playback fallback:", err);
-        // Fallback for local preview testing
+        // Fallback for preview testing
         alert("Playing sound preview: " + title);
     });
 
@@ -56,8 +56,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Dynamic stats counter fetch
+    // Fetch stats immediately and poll frequently every 5 seconds
     fetchStats();
+    setInterval(fetchStats, 5000);
 });
 
 // Search & Filter Commands
@@ -75,20 +76,46 @@ function filterCommands() {
     });
 }
 
-// Fetch stats from backend API
+// Animated Counter Utility
+function animateValue(element, start, end, duration) {
+    if (start === end) return;
+    let startTimestamp = null;
+    const step = (timestamp) => {
+        if (!startTimestamp) startTimestamp = timestamp;
+        const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+        const current = Math.floor(progress * (end - start) + start);
+        element.innerText = current.toLocaleString() + "+";
+        if (progress < 1) {
+            window.requestAnimationFrame(step);
+        }
+    };
+    window.requestAnimationFrame(step);
+}
+
+// Fetch stats frequently from backend API
 async function fetchStats() {
     try {
         const res = await fetch('/api/v1/stats');
         if (res.ok) {
             const data = await res.json();
-            if (data.total_goals) {
-                document.getElementById('stat-goals').innerText = data.total_goals.toLocaleString() + "+";
+            
+            const goalsEl = document.getElementById('stat-goals');
+            const soundsEl = document.getElementById('stat-sounds');
+            
+            if (goalsEl && data.total_goals) {
+                const currentVal = parseInt(goalsEl.innerText.replace(/[^0-9]/g, '')) || 506;
+                if (currentVal !== data.total_goals) {
+                    animateValue(goalsEl, currentVal, data.total_goals, 1000);
+                } else {
+                    goalsEl.innerText = data.total_goals.toLocaleString() + "+";
+                }
             }
-            if (data.total_users) {
-                document.getElementById('stat-servers').innerText = data.total_users.toLocaleString() + "+";
+            
+            if (soundsEl && data.total_sounds) {
+                soundsEl.innerText = data.total_sounds.toLocaleString();
             }
         }
     } catch (err) {
-        // Silent fallback to default mock numbers
+        // Silent fallback
     }
 }
