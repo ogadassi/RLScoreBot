@@ -1,0 +1,29 @@
+# Environment and Secrets
+.env
+*.env
+
+# Large Binaries & Executables
+ffmpeg.exe
+*.exe
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local User Data & Debug Captures
+stats.json
+debug_capture.png
+
+# System & OS Files
+.DS_Store
+Thumbs.db
+
+# Virtual Environments & Build Outputs
+venv/
+.venv/
+env/
+dist/
+build/
+*.spec

@@ -1,0 +1,8 @@
+discord.py
+colorama
+
+Pillow
+pywin32
+python-dotenv
+requests
+PyNaCl
