@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any, List
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "rlscorebot.db")
 STATS_JSON_PATH = os.path.join(os.path.dirname(__file__), "stats.json")
+SOUNDS_DIR_PATH = os.path.join(os.path.dirname(__file__), "sounds")
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
@@ -74,7 +75,6 @@ def migrate_historical_stats():
                 with open(STATS_JSON_PATH, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     
-                total_goals = data.get("total_goals", 0)
                 play_counts = data.get("play_counts", {})
                 
                 # Insert historical records into goal_stats
@@ -167,22 +167,32 @@ def record_goal_stat(discord_user_id: str, guild_id: str, sound_played: str):
         conn.commit()
 
 def get_global_stats() -> Dict[str, Any]:
-    """Retrieve global statistics for website and stats command."""
+    """Retrieve aggregate global statistics sum across ALL users and servers."""
     with get_db() as conn:
         cursor = conn.cursor()
+        
+        # Sum of all goals celebrated across all servers/users
         cursor.execute("SELECT COUNT(*) as total_goals FROM goal_stats")
         total_goals = cursor.fetchone()["total_goals"]
         
+        # Sum of all unique users active across all servers
         cursor.execute("SELECT COUNT(DISTINCT discord_user_id) as total_users FROM users")
         total_users = cursor.fetchone()["total_users"]
         
-        cursor.execute("SELECT COUNT(DISTINCT sound_played) as total_sounds FROM goal_stats")
-        total_sounds = cursor.fetchone()["total_sounds"]
+        # Count all uploaded custom sounds + local sound folder files
+        cursor.execute("SELECT COUNT(*) as uploaded_sounds FROM user_sounds")
+        db_uploaded_sounds = cursor.fetchone()["uploaded_sounds"]
+        
+        local_files_count = 0
+        if os.path.exists(SOUNDS_DIR_PATH):
+            local_files_count = len([f for f in os.listdir(SOUNDS_DIR_PATH) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))])
+            
+        total_sounds = max(db_uploaded_sounds + local_files_count, 45)
         
         return {
             "total_goals": max(total_goals or 0, 506),
             "total_users": max(total_users or 0, 1),
-            "total_sounds": max(total_sounds or 0, 45)
+            "total_sounds": total_sounds
         }
 
 init_db()
