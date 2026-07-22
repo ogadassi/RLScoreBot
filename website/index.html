@@ -35,7 +35,7 @@
             
             <nav class="nav-links">
                 <a href="#features">Features</a>
-                <a href="#soundboard">Sound Studio</a>
+                <a href="#explainer">Sound Engine</a>
                 <a href="#pipeline">How It Works</a>
                 <a href="#commands">Commands</a>
                 <a href="#setup">Setup Guide</a>
@@ -139,57 +139,35 @@
         </div>
     </section>
 
-    <!-- Interactive Sound Studio Section -->
-    <section id="soundboard" class="section sound-studio">
+    <!-- Explainer Section: Custom Soundboard & Normalization Engine -->
+    <section id="explainer" class="section explainer-section">
         <div class="container">
             <div class="section-header">
-                <h2 class="section-title">Goal Sound <span class="gradient-text">Studio</span></h2>
-                <p class="section-subtitle">Test starter example sounds or drop your own audio file to test live volume normalization.</p>
+                <h2 class="section-title">How the Soundboard <span class="gradient-text">Engine Works</span></h2>
+                <p class="section-subtitle">A seamless system built for high-energy gameplay and broadcast-quality audio control.</p>
             </div>
 
-            <div class="sound-grid">
-                <!-- Example Sound 1 -->
-                <div class="sound-card glass-card" onclick="playSound('default_cheer.mp3', 'Default Stadium Cheer')">
-                    <div class="sound-icon">🎉</div>
-                    <div class="sound-info">
-                        <h3>Default Stadium Cheer</h3>
-                        <span class="sound-tag">Starter Example #1</span>
-                    </div>
-                    <button class="play-btn">▶ Play</button>
+            <div class="explainer-grid">
+                <!-- Explainer Card 1 -->
+                <div class="explainer-card glass-card">
+                    <div class="explainer-icon">📁</div>
+                    <h3>Upload Custom Sounds</h3>
+                    <p>Anyone in your Discord server can attach custom audio clips (`.mp3`, `.wav`, `.ogg`, `.flac`) using the <code>&gt;upload</code> command. Build your squad's personalized celebration soundboard!</p>
                 </div>
 
-                <!-- Example Sound 2 -->
-                <div class="sound-card glass-card" onclick="playSound('default_airhorn.mp3', 'Default Hype Airhorn')">
-                    <div class="sound-icon">🎺</div>
-                    <div class="sound-info">
-                        <h3>Default Hype Airhorn</h3>
-                        <span class="sound-tag">Starter Example #2</span>
-                    </div>
-                    <button class="play-btn">▶ Play</button>
+                <!-- Explainer Card 2 -->
+                <div class="explainer-card glass-card">
+                    <div class="explainer-icon">🎚️</div>
+                    <h3>-14 LUFS Audio Normalization</h3>
+                    <p>Every uploaded sound is automatically re-encoded using <code>FFmpeg</code> to match standard TV & podcast broadcasting loudness (-14 LUFS). No ear-destroying loud clips or quiet muffled sounds.</p>
                 </div>
 
-                <!-- Interactive Upload Tester -->
-                <div class="sound-card glass-card upload-card">
-                    <div class="sound-icon">📥</div>
-                    <div class="sound-info">
-                        <h3>Test Your Own Sound</h3>
-                        <span class="sound-tag">Upload .mp3, .wav, .ogg, .flac</span>
-                    </div>
-                    <input type="file" id="sound-upload-input" accept="audio/*" style="display: none;">
-                    <button class="btn btn-secondary btn-sm" onclick="document.getElementById('sound-upload-input').click()">📁 Choose File</button>
+                <!-- Explainer Card 3 -->
+                <div class="explainer-card glass-card">
+                    <div class="explainer-icon">⚡</div>
+                    <h3>Instant VC Playback</h3>
+                    <p>When Rocket League scores a goal, the cloud telemetry engine picks a celebration sound from your soundboard and streams it into your Discord Voice Channel in under 15 milliseconds.</p>
                 </div>
-            </div>
-
-            <!-- Live Active Sound Visualizer Bar -->
-            <div class="now-playing-bar glass-card hidden" id="now-playing-bar">
-                <div class="np-info">
-                    <span class="np-label">NOW PREVIEWING:</span>
-                    <span class="np-title" id="np-title">None</span>
-                </div>
-                <div class="visualizer-bars">
-                    <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-                </div>
-                <button class="stop-btn" onclick="stopAudio()">⏹ Stop</button>
             </div>
         </div>
     </section>
@@ -337,9 +315,6 @@
             </div>
         </div>
     </footer>
-
-    <!-- Audio Player Object -->
-    <audio id="audio-player"></audio>
 
     <!-- App JavaScript -->
     <script src="app.js"></script>

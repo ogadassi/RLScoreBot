@@ -488,64 +488,35 @@ h1, h2, h3, h4 {
     color: var(--text-muted);
 }
 
-/* Sound Studio Grid */
-.sound-grid {
+/* Explainer Grid Section */
+.explainer-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 24px;
+    gap: 28px;
 }
 
-.sound-card {
-    padding: 26px;
+.explainer-card {
+    padding: 32px 24px;
     display: flex;
     flex-direction: column;
     gap: 14px;
-    cursor: pointer;
 }
 
-.sound-icon {
-    font-size: 2rem;
+.explainer-icon {
+    font-size: 2.4rem;
 }
 
-.sound-info h3 {
-    font-size: 1.15rem;
-    margin-bottom: 4px;
-}
-
-.sound-tag {
-    font-size: 0.78rem;
-    color: var(--primary-cyan);
-    font-weight: 600;
-}
-
-.play-btn {
-    margin-top: auto;
-    padding: 10px;
-    border-radius: var(--radius-sm);
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+.explainer-card h3 {
+    font-size: 1.2rem;
+    font-weight: 700;
     color: var(--text-main);
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
 }
 
-.sound-card:hover .play-btn {
-    background: var(--primary-cyan);
-    color: #000;
+.explainer-card p {
+    font-size: 0.92rem;
+    color: var(--text-muted);
+    line-height: 1.6;
 }
-
-.now-playing-bar {
-    margin-top: 32px;
-    padding: 18px 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-color: var(--primary-cyan);
-    box-shadow: var(--glow-cyan);
-}
-
-.hidden { display: none !important; }
 
 /* Pipeline Flow */
 .pipeline-flow {
@@ -720,7 +691,7 @@ h1, h2, h3, h4 {
 /* Responsive Breakpoints */
 @media (max-width: 992px) {
     .hero-container { grid-template-columns: 1fr; }
-    .sound-grid, .commands-grid, .setup-steps { grid-template-columns: repeat(2, 1fr); }
+    .explainer-grid, .commands-grid, .setup-steps { grid-template-columns: repeat(2, 1fr); }
     .pipeline-flow { flex-direction: column; }
     .pipe-arrow { transform: rotate(90deg); }
 }
@@ -731,5 +702,5 @@ h1, h2, h3, h4 {
 
 @media (max-width: 600px) {
     .hero-title { font-size: 2.5rem; }
-    .sound-grid, .commands-grid, .setup-steps { grid-template-columns: 1fr; }
+    .explainer-grid, .commands-grid, .setup-steps { grid-template-columns: 1fr; }
 }
