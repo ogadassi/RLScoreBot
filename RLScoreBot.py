@@ -8,6 +8,7 @@ import aiohttp
 from aiohttp import web
 from datetime import datetime as _dt, timezone, timedelta
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
@@ -67,13 +68,8 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
             except OSError:
                 pass
 
-# ── Randomized Historical Gemini AI Status Generation Engine ───────────────
+# ── Robust Gemini AI Status Generation Engine ───────────────────────────────
 async def fetch_random_chat_history(guild):
-    """
-    Randomized historical chat sampler:
-    Picks a random text channel and samples 50 messages from a random point in time
-    (ranging from channel creation to present) to unearth old classic inside jokes.
-    """
     candidate_channels = [
         c for c in guild.text_channels 
         if c.permissions_for(guild.me).read_message_history and c.permissions_for(guild.me).read_messages
@@ -91,7 +87,6 @@ async def fetch_random_chat_history(guild):
             now = _dt.now(timezone.utc)
             delta_days = (now - created_at).days
 
-            # Pick a random point in time if channel has history > 3 days
             before_date = None
             if delta_days > 3:
                 random_offset_days = random.randint(0, delta_days - 1)
@@ -159,14 +154,14 @@ async def generate_status_from_chat(chat_log: str, api_key: str) -> tuple[str, s
 
 async def update_bot_status(guild) -> tuple[str, str]:
     if not GEMINI_API_KEY:
-        default_status = "Watching Rocket League ⚽ | >join"
+        default_status = "Watching Rocket League ⚽ | /join or >join"
         activity = discord.CustomActivity(name=default_status)
         await bot.change_presence(activity=activity)
         return default_status, "GEMINI_API_KEY environment variable is missing on Render."
 
     chat_log, channel_info = await fetch_random_chat_history(guild)
     if not chat_log:
-        default_status = "Watching Rocket League ⚽ | >join"
+        default_status = "Watching Rocket League ⚽ | /join or >join"
         activity = discord.CustomActivity(name=default_status)
         await bot.change_presence(activity=activity)
         return default_status, f"Chat history unavailable: {channel_info}"
@@ -178,7 +173,7 @@ async def update_bot_status(guild) -> tuple[str, str]:
         logger.success(f"Custom status updated to: \"{status_text}\"")
         return status_text, f"Generated from {channel_info} via {gen_info}"
 
-    default_status = "Watching Rocket League ⚽ | >join"
+    default_status = "Watching Rocket League ⚽ | /join or >join"
     activity = discord.CustomActivity(name=default_status)
     await bot.change_presence(activity=activity)
     return default_status, f"AI generation error: {gen_info}"
@@ -316,105 +311,173 @@ def setup_web_routes(app):
     if os.path.exists(sounds_dir):
         app.router.add_static("/sounds", sounds_dir)
 
-# ── Discord Commands (Prefix >) ───────────────────────────────────────────────
+# ── Core Handlers ─────────────────────────────────────────────────────────────
 
-@bot.command(name="link", help="Get your 6-digit pairing code to link BakkesMod plugin with Discord.")
-async def cmd_link(ctx):
-    code = database.generate_linking_code(str(ctx.author.id))
+async def do_link(user_id: str):
+    code = database.generate_linking_code(user_id)
     embed = discord.Embed(
         title="⚡ RLScoreBot Telemetry Pairing Code",
         description=f"Your pairing code is: **`{code}`**\n\nEnter this code into your game plugin/watcher to link goal telemetry with your Discord Voice Channel.",
         color=discord.Color.blue()
     )
     embed.set_footer(text="Code expires after single use. Keep your pairing code private!")
-    await ctx.send(embed=embed)
+    return embed
 
-@bot.command(name="join", help="Connect bot to your voice channel for goal celebrations.")
-async def cmd_join(ctx):
-    if not ctx.author.voice or not ctx.author.voice.channel:
-        await ctx.send("❌ You are not connected to a voice channel. Please join a voice channel first!")
-        return
+async def do_join(user, guild):
+    if not user.voice or not user.voice.channel:
+        return False, "❌ You are not connected to a voice channel. Please join a voice channel first!"
 
-    channel = ctx.author.voice.channel
-    guild = ctx.guild
-
+    channel = user.voice.channel
     try:
         if guild.voice_client:
             await guild.voice_client.move_to(channel)
         else:
             await channel.connect()
     except Exception as e:
-        await ctx.send(f"❌ Could not join voice channel: {e}")
-        return
+        return False, f"❌ Could not join voice channel: {e}"
 
-    database.update_user_location(str(ctx.author.id), str(guild.id), str(channel.id))
-    await ctx.send(f"✅ Joined **{channel.name}** and ready to celebrate goals!")
+    database.update_user_location(str(user.id), str(guild.id), str(channel.id))
+    return True, f"✅ Joined **{channel.name}** and ready to celebrate goals!"
 
-@bot.command(name="leave", help="Disconnect bot from voice channel.")
-async def cmd_leave(ctx):
-    if ctx.guild.voice_client:
-        await ctx.guild.voice_client.disconnect()
-        await ctx.send("👋 Left voice channel.")
-    else:
-        await ctx.send("❌ Bot is not in a voice channel.")
+async def do_leave(guild):
+    if guild.voice_client:
+        await guild.voice_client.disconnect()
+        return True, "👋 Left voice channel."
+    return False, "❌ Bot is not in a voice channel."
 
-@bot.command(name="upload", help="Upload a custom sound file to the goal soundboard (.mp3, .wav, .ogg).")
-async def cmd_upload(ctx, sound_name: str = None):
-    if not ctx.message.attachments:
-        await ctx.send("❌ Please attach an audio file to your message.")
-        return
-
-    attachment = ctx.message.attachments[0]
+async def do_upload(user_id: str, filename: str, file_bytes: bytes, sound_name: str = None):
     ALLOWED_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".m4a"}
     MAX_SIZE = 25 * 1024 * 1024
 
-    _, ext = os.path.splitext(attachment.filename.lower())
+    _, ext = os.path.splitext(filename.lower())
     if ext not in ALLOWED_EXTENSIONS:
-        await ctx.send(f"❌ Unsupported format `{ext}`. Allowed: `.mp3`, `.wav`, `.ogg`, `.flac`, `.m4a`")
-        return
+        return False, f"❌ Unsupported format `{ext}`. Allowed: `.mp3`, `.wav`, `.ogg`, `.flac`, `.m4a`"
 
-    if attachment.size > MAX_SIZE:
-        await ctx.send("❌ File exceeds 25MB maximum upload limit.")
-        return
+    if len(file_bytes) > MAX_SIZE:
+        return False, "❌ File exceeds 25MB maximum upload limit."
 
-    clean_title = sound_name or attachment.filename
+    clean_title = sound_name or filename
     safe_basename = re.sub(r'[^\w\s\.-]', '', clean_title).strip()
     if not safe_basename.endswith(ext):
         safe_basename += ext
 
     target_path = utils.full_path(SOUNDS_DIR_NAME, safe_basename)
-    
-    file_bytes = await attachment.read()
     with open(target_path, "wb") as f:
         f.write(file_bytes)
 
     ok, msg = await normalize_audio(target_path)
-    database.add_user_sound(str(ctx.author.id), safe_basename, clean_title, target_path)
+    database.add_user_sound(user_id, safe_basename, clean_title, target_path)
 
     embed = discord.Embed(
         title="🎵 New Sound Uploaded to Soundboard!",
         description=f"Successfully added **`{clean_title}`** to the goal celebration soundboard!\n\nVolume normalized to **{TARGET_LUFS} LUFS**.",
         color=discord.Color.green()
     )
+    return True, embed
+
+# ── Slash Commands (UI Autocomplete Popups) ────────────────────────────────────
+
+@bot.tree.command(name="link", description="Get your 6-digit pairing code to link BakkesMod plugin with Discord.")
+async def slash_link(interaction: discord.Interaction):
+    embed = await do_link(str(interaction.user.id))
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="join", description="Connect bot to your voice channel for goal celebrations.")
+async def slash_join(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    ok, msg = await do_join(interaction.user, interaction.guild)
+    await interaction.followup.send(msg, ephemeral=True)
+
+@bot.tree.command(name="leave", description="Disconnect bot from voice channel.")
+async def slash_leave(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    ok, msg = await do_leave(interaction.guild)
+    await interaction.followup.send(msg, ephemeral=True)
+
+@bot.tree.command(name="upload", description="Upload a custom sound file to the goal soundboard.")
+async def slash_upload(interaction: discord.Interaction, file: discord.Attachment, sound_name: str = None):
+    await interaction.response.defer(ephemeral=True)
+    file_bytes = await file.read()
+    ok, res = await do_upload(str(interaction.user.id), file.filename, file_bytes, sound_name)
+    if ok:
+        await interaction.followup.send(embed=res, ephemeral=True)
+    else:
+        await interaction.followup.send(res, ephemeral=True)
+
+@bot.tree.command(name="list", description="List all available goal celebration sounds.")
+async def slash_list(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    sounds = get_available_sounds()
+    embed = discord.Embed(title="🎧 Goal Celebration Soundboard", color=discord.Color.purple())
+    sound_lines = "\n".join([f"• `{s}`" for s in sounds[:30]])
+    embed.add_field(name=f"Available Sounds ({len(sounds)})", value=sound_lines or "No sounds loaded.", inline=False)
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="play", description="Manually trigger a goal sound in the voice channel.")
+async def slash_play(interaction: discord.Interaction, sound_name: str = None):
+    await interaction.response.defer()
+    if not interaction.guild.voice_client:
+        await interaction.followup.send("❌ Bot is not in a voice channel. Run `/join` or `>join` first.")
+        return
+    sound_to_play = sound_name or get_random_sound()
+    success = play_sound_in_vc(interaction.guild.voice_client, sound_to_play)
+    if success:
+        await interaction.followup.send(f"▶ Playing **`{sound_to_play}`**!")
+    else:
+        await interaction.followup.send("⏯️ Bot is already playing a sound.")
+
+@bot.tree.command(name="stats", description="Display goal statistics.")
+async def slash_stats(interaction: discord.Interaction):
+    await interaction.response.defer()
+    stats = database.get_global_stats()
+    embed = discord.Embed(title="🏆 RLScoreBot Goal Statistics", color=discord.Color.gold())
+    embed.add_field(name="⚽ Total Goals Celebrated", value=f"**{stats['total_goals']}**", inline=True)
+    embed.add_field(name="🎵 Soundboard Library Size", value=f"**{len(get_available_sounds())}**", inline=True)
+    await interaction.followup.send(embed=embed)
+
+# ── Prefix Commands (> Prefix Fallback) ───────────────────────────────────────
+
+@bot.command(name="link", help="Get your 6-digit pairing code.")
+async def cmd_link(ctx):
+    embed = await do_link(str(ctx.author.id))
     await ctx.send(embed=embed)
 
-@bot.command(name="list", help="List all available goal celebration sounds.")
+@bot.command(name="join", help="Connect bot to your voice channel.")
+async def cmd_join(ctx):
+    ok, msg = await do_join(ctx.author, ctx.guild)
+    await ctx.send(msg)
+
+@bot.command(name="leave", help="Disconnect bot from voice channel.")
+async def cmd_leave(ctx):
+    ok, msg = await do_leave(ctx.guild)
+    await ctx.send(msg)
+
+@bot.command(name="upload", help="Upload custom sound file.")
+async def cmd_upload(ctx, sound_name: str = None):
+    if not ctx.message.attachments:
+        await ctx.send("❌ Please attach an audio file to your message.")
+        return
+    attachment = ctx.message.attachments[0]
+    file_bytes = await attachment.read()
+    ok, res = await do_upload(str(ctx.author.id), attachment.filename, file_bytes, sound_name)
+    if ok:
+        await ctx.send(embed=res)
+    else:
+        await ctx.send(res)
+
+@bot.command(name="list", help="List available sounds.")
 async def cmd_list(ctx):
     sounds = get_available_sounds()
-    embed = discord.Embed(
-        title="🎧 Goal Celebration Soundboard",
-        color=discord.Color.purple()
-    )
+    embed = discord.Embed(title="🎧 Goal Celebration Soundboard", color=discord.Color.purple())
     sound_lines = "\n".join([f"• `{s}`" for s in sounds[:30]])
     embed.add_field(name=f"Available Sounds ({len(sounds)})", value=sound_lines or "No sounds loaded.", inline=False)
     await ctx.send(embed=embed)
 
-@bot.command(name="play", help="Manually trigger a goal sound in the voice channel.")
+@bot.command(name="play", help="Manually trigger sound.")
 async def cmd_play(ctx, sound_name: str = None):
     if not ctx.guild.voice_client:
-        await ctx.send("❌ Bot is not in a voice channel. Run `>join` first.")
+        await ctx.send("❌ Bot is not in a voice channel. Run `>join` or `/join` first.")
         return
-
     sound_to_play = sound_name or get_random_sound()
     success = play_sound_in_vc(ctx.guild.voice_client, sound_to_play)
     if success:
@@ -422,7 +485,7 @@ async def cmd_play(ctx, sound_name: str = None):
     else:
         await ctx.send("⏯️ Bot is already playing a sound.")
 
-@bot.command(name="status_sync", help="Manually trigger an AI status sync (Owner & Admin Only).")
+@bot.command(name="status_sync", help="Manually trigger AI status sync (Owner & Admin Only).")
 async def cmd_status_sync(ctx):
     is_owner = (ctx.author.id == OWNER_ID)
     is_admin = ctx.author.guild_permissions.administrator if ctx.guild else False
@@ -434,7 +497,7 @@ async def cmd_status_sync(ctx):
     msg = await ctx.send("⏳ Sampling random historical chat history and calling Gemini AI...")
     status_text, diagnostic_info = await update_bot_status(ctx.guild)
     
-    if status_text != "Watching Rocket League ⚽ | >join":
+    if status_text != "Watching Rocket League ⚽ | /join or >join":
         await msg.edit(content=f"✅ Status generated by Gemini: \"{status_text}\"\n*({diagnostic_info})*")
     else:
         await msg.edit(content=f"⚠️ Custom status set to fallback: \"{status_text}\"\n**Reason**: `{diagnostic_info}`")
@@ -442,10 +505,7 @@ async def cmd_status_sync(ctx):
 @bot.command(name="stats", help="Display goal statistics.")
 async def cmd_stats(ctx):
     stats = database.get_global_stats()
-    embed = discord.Embed(
-        title="🏆 RLScoreBot Goal Statistics",
-        color=discord.Color.gold()
-    )
+    embed = discord.Embed(title="🏆 RLScoreBot Goal Statistics", color=discord.Color.gold())
     embed.add_field(name="⚽ Total Goals Celebrated", value=f"**{stats['total_goals']}**", inline=True)
     embed.add_field(name="🎵 Soundboard Library Size", value=f"**{len(get_available_sounds())}**", inline=True)
     await ctx.send(embed=embed)
@@ -454,12 +514,17 @@ async def cmd_stats(ctx):
 async def auto_status_loop():
     for guild in bot.guilds:
         status_text, _ = await update_bot_status(guild)
-        if status_text != "Watching Rocket League ⚽ | >join":
+        if status_text != "Watching Rocket League ⚽ | /join or >join":
             break
 
 @bot.event
 async def on_ready():
     logger.success(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    try:
+        synced = await bot.tree.sync()
+        logger.info(f"Synced {len(synced)} Slash Commands globally!")
+    except Exception as e:
+        logger.error(f"Failed to sync slash commands: {e}")
 
     for guild in bot.guilds:
         await update_bot_status(guild)
