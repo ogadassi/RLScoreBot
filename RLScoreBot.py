@@ -70,27 +70,26 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
 # ── Robust Gemini AI Status Generation Engine ───────────────────────────────
 async def fetch_random_chat_history(guild):
     """
-    Robust chat history fetcher:
-    Searches ALL text channels in the guild, prioritizing #general / #chat,
-    and falls back to any active text channel with user messages.
+    Scans ALL text channels in the guild for readable message history.
     """
     candidate_channels = []
     
-    # 1. Look for preferred channels first
+    # 1. Preferred channels
     for channel in guild.text_channels:
         if channel.name.lower() in ["general", "chat", "main", "discussion", "lobby"]:
             candidate_channels.append(channel)
 
-    # 2. Append all remaining readable text channels
+    # 2. Remaining readable channels
     for channel in guild.text_channels:
-        if channel not in candidate_channels and channel.permissions_for(guild.me).read_message_history:
-            candidate_channels.append(channel)
+        if channel not in candidate_channels:
+            perms = channel.permissions_for(guild.me)
+            if perms.read_messages and perms.read_message_history:
+                candidate_channels.append(channel)
 
     if not candidate_channels:
         logger.warn("No accessible text channels found in guild.")
-        return None
+        return None, "No readable text channels found."
 
-    # Try channels until we get a non-empty chat history
     for channel in candidate_channels:
         try:
             messages = []
@@ -99,68 +98,84 @@ async def fetch_random_chat_history(guild):
                     continue
                 messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
                 
-            if len(messages) >= 3:
+            if messages:
                 logger.info(f"Fetched {len(messages)} messages from channel #{channel.name}")
-                return "\n".join(reversed(messages))
+                return "\n".join(reversed(messages)), f"Channel #{channel.name}"
         except Exception as e:
             logger.warn(f"Could not read channel #{channel.name}: {e}")
             continue
 
-    return None
+    return None, "No text messages found in server channels."
 
-async def generate_status_from_chat(chat_log: str, api_key: str) -> str:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+async def generate_status_from_chat(chat_log: str, api_key: str) -> tuple[str, str]:
+    models_to_try = [
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-pro-latest",
+        "gemini-pro"
+    ]
+
     prompt = (
         "Below is a chat log from a Discord server's conversation. "
         "Create a funny, short, iconic 1-sentence Discord status (under 100 characters) "
         "that captures the vibe, humor, or inside jokes of the conversation. Output ONLY the status text.\n\n"
         f"CHAT LOG:\n{chat_log}"
     )
+
     payload = {
         "contents": [{"parts": [{"text": prompt}]}]
     }
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, timeout=20) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    candidates = data.get('candidates', [])
-                    if candidates and 'content' in candidates[0]:
-                        parts = candidates[0]['content'].get('parts', [])
-                        if parts:
-                            status_text = parts[0]['text'].strip().strip('"').strip("'")
-                            return status_text[:120]
-                else:
-                    err_text = await response.text()
-                    logger.error(f"Gemini API error ({response.status}): {err_text}")
-                return None
-    except Exception as e:
-        logger.warn(f"Gemini API status generation failed: {e}")
-        return None
+    last_error = "Unknown error"
+    async with aiohttp.ClientSession() as session:
+        for model in models_to_try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            try:
+                async with session.post(url, json=payload, timeout=15) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        candidates = data.get('candidates', [])
+                        if candidates and 'content' in candidates[0]:
+                            parts = candidates[0]['content'].get('parts', [])
+                            if parts:
+                                status_text = parts[0]['text'].strip().strip('"').strip("'")
+                                return status_text[:120], f"Model {model}"
+                    else:
+                        err_text = await response.text()
+                        last_error = f"Gemini {model} HTTP {response.status}: {err_text[:100]}"
+                        logger.error(last_error)
+            except Exception as e:
+                last_error = f"Gemini {model} exception: {e}"
+                logger.warn(last_error)
 
-async def update_bot_status(guild) -> str:
+    return None, last_error
+
+async def update_bot_status(guild) -> tuple[str, str]:
     if not GEMINI_API_KEY:
-        activity = discord.CustomActivity(name="Watching Rocket League ⚽ | >join")
+        default_status = "Watching Rocket League ⚽ | >join"
+        activity = discord.CustomActivity(name=default_status)
         await bot.change_presence(activity=activity)
-        return "Watching Rocket League ⚽ | >join"
+        return default_status, "GEMINI_API_KEY environment variable is missing on Render."
 
-    chat_log = await fetch_random_chat_history(guild)
+    chat_log, channel_info = await fetch_random_chat_history(guild)
     if not chat_log:
-        activity = discord.CustomActivity(name="Watching Rocket League ⚽ | >join")
+        default_status = "Watching Rocket League ⚽ | >join"
+        activity = discord.CustomActivity(name=default_status)
         await bot.change_presence(activity=activity)
-        return "Watching Rocket League ⚽ | >join"
+        return default_status, f"Chat history unavailable: {channel_info}"
 
-    status_text = await generate_status_from_chat(chat_log, GEMINI_API_KEY)
+    status_text, gen_info = await generate_status_from_chat(chat_log, GEMINI_API_KEY)
     if status_text:
         activity = discord.CustomActivity(name=status_text)
         await bot.change_presence(activity=activity)
         logger.success(f"Custom status updated to: \"{status_text}\"")
-        return status_text
+        return status_text, f"Generated from {channel_info} via {gen_info}"
 
-    activity = discord.CustomActivity(name="Watching Rocket League ⚽ | >join")
+    default_status = "Watching Rocket League ⚽ | >join"
+    activity = discord.CustomActivity(name=default_status)
     await bot.change_presence(activity=activity)
-    return "Watching Rocket League ⚽ | >join"
+    return default_status, f"AI generation error: {gen_info}"
 
 # ── Soundboard Manager ───────────────────────────────────────────────────────
 def get_available_sounds():
@@ -410,12 +425,13 @@ async def cmd_status_sync(ctx):
         await ctx.send("❌ Permission denied. `>status_sync` is restricted to bot owner and server administrators.")
         return
 
-    msg = await ctx.send("⏳ Reading server chat history and generating AI status...")
-    status_text = await update_bot_status(ctx.guild)
-    if status_text:
-        await msg.edit(content=f"✅ Status updated to: \"{status_text}\"")
+    msg = await ctx.send("⏳ Reading server chat history and calling Gemini AI...")
+    status_text, diagnostic_info = await update_bot_status(ctx.guild)
+    
+    if status_text != "Watching Rocket League ⚽ | >join":
+        await msg.edit(content=f"✅ Status generated by Gemini: \"{status_text}\"\n*({diagnostic_info})*")
     else:
-        await msg.edit(content="❌ Could not generate status. Ensure GEMINI_API_KEY is configured on Render.")
+        await msg.edit(content=f"⚠️ Custom status set to fallback: \"{status_text}\"\n**Reason**: `{diagnostic_info}`")
 
 @bot.command(name="stats", help="Display goal statistics.")
 async def cmd_stats(ctx):
@@ -431,8 +447,8 @@ async def cmd_stats(ctx):
 @tasks.loop(hours=6)
 async def auto_status_loop():
     for guild in bot.guilds:
-        status_text = await update_bot_status(guild)
-        if status_text:
+        status_text, _ = await update_bot_status(guild)
+        if status_text != "Watching Rocket League ⚽ | >join":
             break
 
 @bot.event
