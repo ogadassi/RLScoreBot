@@ -401,14 +401,21 @@ async def cmd_play(ctx, sound_name: str = None):
     else:
         await ctx.send("⏯️ Bot is already playing a sound.")
 
-@bot.command(name="status_sync", help="Manually trigger an AI status sync from server chat history.")
+@bot.command(name="status_sync", help="Manually trigger an AI status sync (Owner & Admin Only).")
 async def cmd_status_sync(ctx):
+    is_owner = (ctx.author.id == OWNER_ID)
+    is_admin = ctx.author.guild_permissions.administrator if ctx.guild else False
+
+    if not (is_owner or is_admin):
+        await ctx.send("❌ Permission denied. `>status_sync` is restricted to bot owner and server administrators.")
+        return
+
     msg = await ctx.send("⏳ Reading server chat history and generating AI status...")
     status_text = await update_bot_status(ctx.guild)
     if status_text:
         await msg.edit(content=f"✅ Status updated to: \"{status_text}\"")
     else:
-        await msg.edit(content="❌ Could not generate status. Ensure GEMINI_API_KEY is set on Render.")
+        await msg.edit(content="❌ Could not generate status. Ensure GEMINI_API_KEY is configured on Render.")
 
 @bot.command(name="stats", help="Display goal statistics.")
 async def cmd_stats(ctx):
