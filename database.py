@@ -32,17 +32,24 @@ def init_db():
             )
         """)
         
-        # User Uploaded Sounds Library
+        # Server Uploaded Sounds Library (Scoped to guild_id)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_sounds (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 discord_user_id TEXT,
+                guild_id TEXT,
                 filename TEXT,
                 display_name TEXT,
                 file_path TEXT,
                 created_at REAL
             )
         """)
+
+        # Ensure guild_id column exists if table was created previously
+        try:
+            cursor.execute("ALTER TABLE user_sounds ADD COLUMN guild_id TEXT")
+        except sqlite3.OperationalError:
+            pass # Column already exists
 
         # Goal Statistics
         cursor.execute("""
@@ -57,7 +64,7 @@ def init_db():
         
         conn.commit()
 
-    # Migrate stats.json if present and database goal_stats is empty
+    # Migrate stats.json if present
     migrate_historical_stats()
 
 def migrate_historical_stats():
@@ -77,7 +84,6 @@ def migrate_historical_stats():
                     
                 play_counts = data.get("play_counts", {})
                 
-                # Insert historical records into goal_stats
                 now = time.time()
                 for sound_file, count in play_counts.items():
                     for _ in range(count):
@@ -130,29 +136,22 @@ def update_user_location(discord_user_id: str, guild_id: str, voice_channel_id: 
         """, (str(guild_id), str(voice_channel_id), now, str(discord_user_id)))
         conn.commit()
 
-def set_user_sound(discord_user_id: str, sound_name: str):
-    """Set active celebration anthem for user."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET selected_sound = ? WHERE discord_user_id = ?", (sound_name, str(discord_user_id)))
-        conn.commit()
-
-def add_user_sound(discord_user_id: str, filename: str, display_name: str, file_path: str):
-    """Add uploaded sound to user's personal library."""
+def add_guild_sound(discord_user_id: str, guild_id: str, filename: str, display_name: str, file_path: str):
+    """Add uploaded sound to the server's soundboard library."""
     now = time.time()
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO user_sounds (discord_user_id, filename, display_name, file_path, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        """, (str(discord_user_id), filename, display_name, file_path, now))
+            INSERT INTO user_sounds (discord_user_id, guild_id, filename, display_name, file_path, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (str(discord_user_id), str(guild_id), filename, display_name, file_path, now))
         conn.commit()
 
-def get_user_sounds(discord_user_id: str) -> List[Dict[str, Any]]:
-    """Retrieve all sounds uploaded by user."""
+def get_guild_sounds(guild_id: str) -> List[Dict[str, Any]]:
+    """Retrieve all sounds uploaded by users in a specific server."""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM user_sounds WHERE discord_user_id = ?", (str(discord_user_id),))
+        cursor.execute("SELECT * FROM user_sounds WHERE guild_id = ?", (str(guild_id),))
         return [dict(row) for row in cursor.fetchall()]
 
 def record_goal_stat(discord_user_id: str, guild_id: str, sound_played: str):
@@ -171,15 +170,12 @@ def get_global_stats() -> Dict[str, Any]:
     with get_db() as conn:
         cursor = conn.cursor()
         
-        # Sum of all goals celebrated across all servers/users
         cursor.execute("SELECT COUNT(*) as total_goals FROM goal_stats")
         total_goals = cursor.fetchone()["total_goals"]
         
-        # Sum of all unique users active across all servers
         cursor.execute("SELECT COUNT(DISTINCT discord_user_id) as total_users FROM users")
         total_users = cursor.fetchone()["total_users"]
         
-        # Count all uploaded custom sounds + local sound folder files
         cursor.execute("SELECT COUNT(*) as uploaded_sounds FROM user_sounds")
         db_uploaded_sounds = cursor.fetchone()["uploaded_sounds"]
         

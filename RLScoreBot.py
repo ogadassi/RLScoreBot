@@ -76,6 +76,32 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
             except OSError:
                 pass
 
+# ── Soundboard Manager (100% Server Guild Scoped) ───────────────────────────
+def get_guild_sound_library(guild_id: str = None) -> list[str]:
+    """
+    Returns server-specific uploaded sounds combined with default starter sounds.
+    Ensures sounds uploaded in Server A stay isolated to Server A!
+    """
+    default_sounds = ["default_cheer.mp3", "default_airhorn.mp3"]
+    
+    if not guild_id:
+        dir_path = utils.full_path(SOUNDS_DIR_NAME)
+        if os.path.exists(dir_path):
+            files = [f for f in os.listdir(dir_path) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
+            return files if files else default_sounds
+        return default_sounds
+
+    guild_records = database.get_guild_sounds(str(guild_id))
+    guild_filenames = [r["filename"] for r in guild_records if r.get("filename")]
+
+    # Combine server custom sounds + default starter sounds
+    combined = list(dict.fromkeys(guild_filenames + default_sounds))
+    return combined
+
+def get_random_sound_for_guild(guild_id: str = None) -> str:
+    sounds = get_guild_sound_library(guild_id)
+    return random.choice(sounds)
+
 # ── Robust Gemini AI Status Generation Engine ───────────────────────────────
 async def fetch_random_chat_history(guild):
     candidate_channels = [
@@ -193,18 +219,6 @@ async def update_bot_status(guild) -> tuple[str, str]:
     await bot.change_presence(activity=activity)
     return default_status, f"AI generation fallback: {gen_info}"
 
-# ── Soundboard Manager ───────────────────────────────────────────────────────
-def get_available_sounds():
-    dir_path = utils.full_path(SOUNDS_DIR_NAME)
-    if not os.path.exists(dir_path):
-        os.makedirs(dir_path, exist_ok=True)
-    files = [f for f in os.listdir(dir_path) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
-    return files if files else ["default_cheer.mp3"]
-
-def get_random_sound():
-    sounds = get_available_sounds()
-    return random.choice(sounds)
-
 # ── Bot Client Setup ──────────────────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.voice_states = True
@@ -296,7 +310,8 @@ async def handle_goal_webhook(request):
         except Exception as e:
             return web.json_response({"error": f"Failed to connect to voice: {e}"}, status=500)
 
-    sound_to_play = data.get("sound") or get_random_sound()
+    # Play sound from the active server's soundboard library
+    sound_to_play = data.get("sound") or get_random_sound_for_guild(guild_id)
     success = play_sound_in_vc(voice_client, sound_to_play)
     if success:
         database.record_goal_stat(discord_user_id, guild_id, sound_to_play)
@@ -356,7 +371,7 @@ async def do_leave(guild):
         return True, "👋 Left voice channel."
     return False, "❌ Bot is not in a voice channel."
 
-async def do_upload(user_id: str, filename: str, file_bytes: bytes, sound_name: str = None):
+async def do_upload(user_id: str, guild_id: str, filename: str, file_bytes: bytes, sound_name: str = None):
     ALLOWED_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".m4a"}
     MAX_SIZE = 25 * 1024 * 1024
 
@@ -386,11 +401,11 @@ async def do_upload(user_id: str, filename: str, file_bytes: bytes, sound_name: 
         return False, f"❌ Server file write error: {exc}"
 
     ok, msg = await normalize_audio(target_path)
-    database.add_user_sound(user_id, safe_basename, clean_title, target_path)
+    database.add_guild_sound(user_id, str(guild_id), safe_basename, clean_title, target_path)
 
     embed = discord.Embed(
-        title="🎵 New Sound Uploaded to Soundboard!",
-        description=f"Successfully added **`{clean_title}`** to the goal celebration soundboard!\n\nVolume normalized to **{TARGET_LUFS} LUFS**.",
+        title="🎵 New Sound Uploaded to Server Soundboard!",
+        description=f"Successfully added **`{clean_title}`** to this server's soundboard library!\n\nVolume normalized to **{TARGET_LUFS} LUFS**.",
         color=discord.Color.green()
     )
     return True, embed
@@ -414,13 +429,13 @@ async def slash_leave(interaction: discord.Interaction):
     ok, msg = await do_leave(interaction.guild)
     await interaction.followup.send(msg, ephemeral=True)
 
-@bot.tree.command(name="upload", description="Upload a custom sound file to the goal soundboard.")
+@bot.tree.command(name="upload", description="Upload a custom sound file to this server's soundboard.")
 @app_commands.describe(file="Select an audio file (.mp3, .wav, .ogg)", sound_name="Optional custom title")
 async def slash_upload(interaction: discord.Interaction, file: discord.Attachment, sound_name: str = None):
     try:
         await interaction.response.defer(ephemeral=True)
         file_bytes = await file.read()
-        ok, res = await do_upload(str(interaction.user.id), file.filename, file_bytes, sound_name)
+        ok, res = await do_upload(str(interaction.user.id), str(interaction.guild_id), file.filename, file_bytes, sound_name)
         if ok:
             await interaction.followup.send(embed=res, ephemeral=True)
         else:
@@ -435,13 +450,13 @@ async def slash_upload(interaction: discord.Interaction, file: discord.Attachmen
         except Exception:
             pass
 
-@bot.tree.command(name="list", description="List all available goal celebration sounds.")
+@bot.tree.command(name="list", description="List all sounds in this server's soundboard library.")
 async def slash_list(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    sounds = get_available_sounds()
-    embed = discord.Embed(title="🎧 Goal Celebration Soundboard", color=discord.Color.purple())
+    sounds = get_guild_sound_library(str(interaction.guild_id))
+    embed = discord.Embed(title="🎧 Server Goal Celebration Soundboard", color=discord.Color.purple())
     sound_lines = "\n".join([f"• `{s}`" for s in sounds[:30]])
-    embed.add_field(name=f"Available Sounds ({len(sounds)})", value=sound_lines or "No sounds loaded.", inline=False)
+    embed.add_field(name=f"Server Loaded Sounds ({len(sounds)})", value=sound_lines or "No custom sounds uploaded yet.", inline=False)
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="play", description="Manually trigger a goal sound in the voice channel.")
@@ -450,21 +465,12 @@ async def slash_play(interaction: discord.Interaction, sound_name: str = None):
     if not interaction.guild.voice_client:
         await interaction.followup.send("❌ Bot is not in a voice channel. Run `/join` or `>join` first.")
         return
-    sound_to_play = sound_name or get_random_sound()
+    sound_to_play = sound_name or get_random_sound_for_guild(str(interaction.guild_id))
     success = play_sound_in_vc(interaction.guild.voice_client, sound_to_play)
     if success:
         await interaction.followup.send(f"▶ Playing **`{sound_to_play}`**!")
     else:
         await interaction.followup.send("⏯️ Bot is already playing a sound.")
-
-@bot.tree.command(name="stats", description="Display goal statistics.")
-async def slash_stats(interaction: discord.Interaction):
-    await interaction.response.defer()
-    stats = database.get_global_stats()
-    embed = discord.Embed(title="🏆 RLScoreBot Goal Statistics", color=discord.Color.gold())
-    embed.add_field(name="⚽ Total Goals Celebrated", value=f"**{stats['total_goals']}**", inline=True)
-    embed.add_field(name="🎵 Soundboard Library Size", value=f"**{len(get_available_sounds())}**", inline=True)
-    await interaction.followup.send(embed=embed)
 
 # ── Prefix Commands (> Prefix Fallback) ───────────────────────────────────────
 
@@ -483,25 +489,25 @@ async def cmd_leave(ctx):
     ok, msg = await do_leave(ctx.guild)
     await ctx.send(msg)
 
-@bot.command(name="upload", help="Upload custom sound file.")
+@bot.command(name="upload", help="Upload custom sound file to this server's soundboard.")
 async def cmd_upload(ctx, sound_name: str = None):
     if not ctx.message.attachments:
         await ctx.send("❌ Please attach an audio file to your message.")
         return
     attachment = ctx.message.attachments[0]
     file_bytes = await attachment.read()
-    ok, res = await do_upload(str(ctx.author.id), attachment.filename, file_bytes, sound_name)
+    ok, res = await do_upload(str(ctx.author.id), str(ctx.guild.id), attachment.filename, file_bytes, sound_name)
     if ok:
         await ctx.send(embed=res)
     else:
         await ctx.send(res)
 
-@bot.command(name="list", help="List available sounds.")
+@bot.command(name="list", help="List available sounds in this server's soundboard.")
 async def cmd_list(ctx):
-    sounds = get_available_sounds()
-    embed = discord.Embed(title="🎧 Goal Celebration Soundboard", color=discord.Color.purple())
+    sounds = get_guild_sound_library(str(ctx.guild.id))
+    embed = discord.Embed(title="🎧 Server Goal Celebration Soundboard", color=discord.Color.purple())
     sound_lines = "\n".join([f"• `{s}`" for s in sounds[:30]])
-    embed.add_field(name=f"Available Sounds ({len(sounds)})", value=sound_lines or "No sounds loaded.", inline=False)
+    embed.add_field(name=f"Server Loaded Sounds ({len(sounds)})", value=sound_lines or "No custom sounds uploaded yet.", inline=False)
     await ctx.send(embed=embed)
 
 @bot.command(name="play", help="Manually trigger sound.")
@@ -509,7 +515,7 @@ async def cmd_play(ctx, sound_name: str = None):
     if not ctx.guild.voice_client:
         await ctx.send("❌ Bot is not in a voice channel. Run `>join` or `/join` first.")
         return
-    sound_to_play = sound_name or get_random_sound()
+    sound_to_play = sound_name or get_random_sound_for_guild(str(ctx.guild.id))
     success = play_sound_in_vc(ctx.guild.voice_client, sound_to_play)
     if success:
         await ctx.send(f"▶ Playing **`{sound_to_play}`**!")
@@ -538,7 +544,7 @@ async def cmd_stats(ctx):
     stats = database.get_global_stats()
     embed = discord.Embed(title="🏆 RLScoreBot Goal Statistics", color=discord.Color.gold())
     embed.add_field(name="⚽ Total Goals Celebrated", value=f"**{stats['total_goals']}**", inline=True)
-    embed.add_field(name="🎵 Soundboard Library Size", value=f"**{len(get_available_sounds())}**", inline=True)
+    embed.add_field(name="🎵 Soundboard Library Size", value=f"**{len(get_guild_sound_library(str(ctx.guild.id)))}**", inline=True)
     await ctx.send(embed=embed)
 
 @tasks.loop(hours=6)
