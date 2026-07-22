@@ -117,11 +117,29 @@ def build_soundboard_embed(sounds: list[str], title_label: str) -> discord.Embed
     return embed
 
 # ── Elite Legacy Gemini AI Status Generation Engine ──────────────────────────
+def is_bot_command_or_talk(msg: discord.Message) -> bool:
+    """Filter out bot commands and messages directed at bots."""
+    content = msg.content.strip()
+    if not content:
+        return True
+    # Filter prefix commands
+    if content.startswith(('>', '/', '!', '$', '.', '-', '~', '?')):
+        return True
+    # Filter mentions of bots
+    if any(m.bot for m in msg.mentions):
+        return True
+    # Filter common bot command terms
+    bot_terms = {'join', 'leave', 'upload', 'refresh', 'play', 'link', 'stats', 'help', 'status_sync', 'refresg'}
+    words = [w.lower().strip('>!/.') for w in content.split()]
+    if any(w in bot_terms for w in words):
+        return True
+    return False
+
 async def fetch_random_chat_history(guild):
     """
-    Exact Legacy Algorithm:
+    Exact Legacy Algorithm with Human-Only Message Filtering:
     Finds a text channel named 'general' in the guild, picks a random day/time, 
-    and returns up to 50 messages formatted as a chat log.
+    and returns up to 50 human-to-human messages (filtering out bot commands).
     """
     target_channel = None
     for channel in guild.text_channels:
@@ -150,23 +168,27 @@ async def fetch_random_chat_history(guild):
         random_time = start_date + timedelta(seconds=random_seconds)
 
         messages = []
-        async for msg in target_channel.history(limit=50, after=random_time):
-            if msg.author.bot or not msg.content.strip():
+        async for msg in target_channel.history(limit=120, after=random_time):
+            if msg.author.bot or is_bot_command_or_talk(msg):
                 continue
             messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
+            if len(messages) >= 50:
+                break
             
         if not messages:
-            async for msg in target_channel.history(limit=50):
-                if msg.author.bot or not msg.content.strip():
+            async for msg in target_channel.history(limit=120):
+                if msg.author.bot or is_bot_command_or_talk(msg):
                     continue
                 messages.append(f"{msg.author.display_name}: {msg.content.strip()}")
+                if len(messages) >= 50:
+                    break
             messages.reverse()
                 
         if messages:
-            logger.info(f"Fetched {len(messages)} messages from #{target_channel.name}")
+            logger.info(f"Fetched {len(messages)} human messages from #{target_channel.name}")
             return "\n".join(messages), f"#{target_channel.name}"
             
-        return None, "No text messages found in channel."
+        return None, "No human chat messages found in channel."
     except Exception as e:
         logger.error(f"Error fetching random chat history: {e}")
         return None, str(e)
@@ -183,13 +205,14 @@ async def generate_status_from_chat(chat_text: str, api_key: str) -> tuple[str, 
     ]
 
     prompt = (
-        "Below is a segment of chat history from a Discord channel.\n"
-        "Generate a funny, concise custom status for a bot based on this chat.\n"
+        "Below is a segment of chat history between human members in a Discord channel.\n"
+        "Generate a funny, concise custom status for a bot based on these human conversations.\n"
         "Requirements:\n"
         "1. Must be under 128 characters (extremely short and punchy).\n"
         "2. Must sound like a custom status message (e.g. an activity, a funny quote, or a dry joke).\n"
         "3. Absolutely do NOT wrap in quotation marks or prefix with 'Status:' or anything similar.\n"
-        "4. Output only the status text itself.\n\n"
+        "4. Output only the status text itself.\n"
+        "5. Focus strictly on human conversations, gaming banter, and jokes. Do NOT reference bot commands, bot prefixes (like > or /), or bot system instructions.\n\n"
         f"Chat History:\n{chat_text}"
     )
 
