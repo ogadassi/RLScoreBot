@@ -1,12 +1,13 @@
 # ⚡ RLScoreBot — Automated Goal Soundboard for Rocket League
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ogadassi/RLScoreBot)
 [![Website](https://img.shields.io/badge/Website-2026%20Gaming%20UI-00f0ff.svg)](https://ogadassi.github.io/RLScoreBot/)
 [![Release](https://img.shields.io/badge/release-v2.0.0--cloud-ff6b00.svg)](https://github.com/ogadassi/RLScoreBot/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](LICENSE)
 [![Discord API](https://img.shields.io/badge/Discord-Slash%20Commands-5865F2.svg)](https://discord.com/developers/docs)
-[![BakkesMod](https://img.shields.io/badge/BakkesMod-Telemetry-green.svg)](https://www.bakkesmod.com/)
 
-🌐 **Live Web Application**: [https://ogadassi.github.io/RLScoreBot/](https://ogadassi.github.io/RLScoreBot/)
+🌐 **Live Web Application**: [https://ogadassi.github.io/RLScoreBot/](https://ogadassi.github.io/RLScoreBot/)  
+🚀 **1-Click 24/7 Cloud Host**: [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ogadassi/RLScoreBot)
 
 **RLScoreBot** is a 24/7 Cloud-Hosted Discord Bot & 2026 Web Application that plays **custom uploaded goal celebration sounds** in your Discord Voice Channel whenever a goal is scored in Rocket League!
 
@@ -15,22 +16,20 @@
 
 ---
 
-## 🌐 How the Bot & Website are Hosted
+## 🚀 1-Click Free 24/7 Cloud Deployment
 
-The application uses a **hybrid hosting architecture**:
+Click the button below to automatically deploy RLScoreBot to **Render.com** (100% Free 24/7 Hosting):
 
-1. **Live Website (GitHub Pages)**:
-   - Hosted automatically at [https://ogadassi.github.io/RLScoreBot/](https://ogadassi.github.io/RLScoreBot/) via GitHub Actions (`.github/workflows/deploy-pages.yml`).
-   - Features the interactive soundboard preview, command explorer, and 1-click Discord bot invite link.
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ogadassi/RLScoreBot)
 
-2. **24/7 Cloud Bot Engine (Unified Docker App)**:
-   - The bot script ([RLScoreBot.py](file:///f:/Programming/new%20stuff/RLScoreBot/RLScoreBot.py)) runs an embedded `aiohttp` web server.
-   - It hosts the Discord Bot connection, SQLite database, and webhook API (`POST /api/v1/goal`) inside a single container via `Dockerfile` / `docker-compose.yml`.
-   - Can be hosted for **100% free 24/7** on **Oracle Cloud (Always Free)**, **Koyeb**, **Render**, or **Railway**.
+1. Click **Deploy to Render**.
+2. Sign in with GitHub (`ogadassi`).
+3. Enter your `DISCORD_TOKEN` and `OWNER_ID`.
+4. Click **Apply** — Render will build the Docker container and keep your bot online 24/7!
 
 ---
 
-## 🚀 Key Features
+## ⚙️ Key Features
 
 * 🎵 **Custom Soundboard Library**: Server members can upload custom celebration sound clips (`/upload`). All uploads are automatically processed via `ffmpeg` to match standard broadcasting loudness (**-14 LUFS**).
 * 🔌 **Zero-Friction BakkesMod Telemetry**: A silent C++ BakkesMod plugin catches goal events in Rocket League memory with **0% CPU/GPU overhead** and pings the cloud bot.
@@ -73,23 +72,6 @@ The application uses a **hybrid hosting architecture**:
 | `/join` | Connect RLScoreBot to your current Discord voice channel. |
 | `/leave` | Disconnect RLScoreBot from voice channel. |
 | `/stats` | Display server goal statistics and play counts. |
-
----
-
-## 🐳 Self-Hosting the Cloud Engine with Docker
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/ogadassi/RLScoreBot.git
-cd RLScoreBot
-
-# 2. Configure environment
-cp .env.example .env
-# Edit .env with your DISCORD_TOKEN and OWNER_ID
-
-# 3. Launch Container
-docker-compose up -d
-```
 
 ---
 
