@@ -24,7 +24,7 @@ REF_BOX_CENTER_X = REF_BOX[0] + (REF_BOX_WIDTH // 2)
 REF_OFFSET_FROM_CENTER = REF_BOX_CENTER_X - REF_SCREEN_CENTER_X  # Should be negative (~ -137.5)
 
 DIFFERENCE_SIMILARITY_THRESHOLD = 0.90
-SAVED_IMAGE_SIMILARITY_THRESHOLD = 0.60
+SAVED_IMAGE_SIMILARITY_THRESHOLD = 0.55
 
 IMAGES_AMOUNT = 21
 IMAGES_DIR = "images"
@@ -100,13 +100,6 @@ def get_score_img():
     if not hwnd:
         raise RuntimeError(f"{ROCKET_LEAGUE_NAME} is not open")
     
-    # bbox = win32gui.GetWindowRect(hwnd[0]) # Moved down
-
-    # Strict Check: Only run if Rocket League is the ACTUAL active window.
-    # This prevents the bot from reading your browser/discord when you Alt-Tab.
-    if win32gui.GetForegroundWindow() != hwnd[0]:
-        raise RuntimeError(f"{ROCKET_LEAGUE_NAME} is not in focus")
-
     bbox = win32gui.GetWindowRect(hwnd[0])
 
     if not is_foreground(bbox):
