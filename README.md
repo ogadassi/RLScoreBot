@@ -1,13 +1,12 @@
 # ⚡ RLScoreBot — Automated Goal Soundboard for Rocket League
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ogadassi/RLScoreBot)
 [![Website](https://img.shields.io/badge/Website-2026%20Gaming%20UI-00f0ff.svg)](https://ogadassi.github.io/RLScoreBot/)
 [![Release](https://img.shields.io/badge/release-v2.0.0--cloud-ff6b00.svg)](https://github.com/ogadassi/RLScoreBot/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](LICENSE)
 [![Discord API](https://img.shields.io/badge/Discord-Slash%20Commands-5865F2.svg)](https://discord.com/developers/docs)
+[![BakkesMod](https://img.shields.io/badge/BakkesMod-Telemetry-green.svg)](https://www.bakkesmod.com/)
 
-🌐 **Live Web Application**: [https://ogadassi.github.io/RLScoreBot/](https://ogadassi.github.io/RLScoreBot/)  
-🚀 **1-Click 24/7 Cloud Host**: [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ogadassi/RLScoreBot)
+🌐 **Live Web Application**: [https://ogadassi.github.io/RLScoreBot/](https://ogadassi.github.io/RLScoreBot/)
 
 **RLScoreBot** is a 24/7 Cloud-Hosted Discord Bot & 2026 Web Application that plays **custom uploaded goal celebration sounds** in your Discord Voice Channel whenever a goal is scored in Rocket League!
 
@@ -16,25 +15,12 @@
 
 ---
 
-## 🚀 1-Click Free 24/7 Cloud Deployment
-
-Click the button below to automatically deploy RLScoreBot to **Render.com** (100% Free 24/7 Hosting):
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ogadassi/RLScoreBot)
-
-1. Click **Deploy to Render**.
-2. Sign in with GitHub (`ogadassi`).
-3. Enter your `DISCORD_TOKEN` and `OWNER_ID`.
-4. Click **Apply** — Render will build the Docker container and keep your bot online 24/7!
-
----
-
-## ⚙️ Key Features
+## 🚀 Key Features
 
 * 🎵 **Custom Soundboard Library**: Server members can upload custom celebration sound clips (`/upload`). All uploads are automatically processed via `ffmpeg` to match standard broadcasting loudness (**-14 LUFS**).
-* 🔌 **Zero-Friction BakkesMod Telemetry**: A silent C++ BakkesMod plugin catches goal events in Rocket League memory with **0% CPU/GPU overhead** and pings the cloud bot.
+* 🔌 **Zero-Friction BakkesMod Telemetry**: A silent C++ BakkesMod plugin catches goal events in Rocket League memory with **0% CPU/GPU overhead** and pings the central cloud bot.
 * 🌐 **2026 Gaming Web Application**: Interactive Web UI featuring sound previews, command search explorer, and 1-click Discord invite generator.
-* 🐳 **1-Click Container Deployment**: Built with `Dockerfile` and `docker-compose.yml` for instant deployment.
+* ☁️ **24/7 Central Cloud Engine**: Hosted centrally so any server owner can invite the bot with 1 click!
 
 ---
 
@@ -42,7 +28,7 @@ Click the button below to automatically deploy RLScoreBot to **Render.com** (100
 
 ```
  ┌─────────────────────────┐               ┌─────────────────────────────────┐               ┌─────────────────────────┐
- │   Gamer's PC (RL)       │               │      Cloud Server (24/7)        │               │   Friends' Discord VC   │
+ │   Gamer's PC (RL)       │               │      Central Cloud Server       │               │   Friends' Discord VC   │
  │                         │               │                                 │               │                         │
  │  BakkesMod Plugin       │──HTTP Webhook─►  FastAPI / aiohttp Web Endpoint  │               │  Bot joins VC & plays   │
  │  (Detects Goal Event)   │   (/api/goal) │                │                │──Voice Audio─►│  Goal Celebration Sound │
