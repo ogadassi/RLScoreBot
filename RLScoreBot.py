@@ -736,6 +736,8 @@ async def monitor_game_status():
                     pass
             await asyncio.sleep(0.5)
             await bot.close()
+            import sys
+            sys.exit(2)
     else:
         monitor_game_status._seen_running = True
         
