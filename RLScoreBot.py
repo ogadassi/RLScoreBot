@@ -31,15 +31,23 @@ TARGET_LUFS     = -14
 async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> tuple[bool, str]:
     import tempfile
 
+    sounds_dir = os.path.dirname(file_path)
+    if not os.path.exists(sounds_dir):
+        os.makedirs(sounds_dir, exist_ok=True)
+
     tmp_fd, tmp_path = tempfile.mkstemp(
         suffix=".mp3",
-        dir=os.path.dirname(file_path)
+        dir=sounds_dir
     )
     os.close(tmp_fd)
 
     try:
+        ffmpeg_exec = utils.full_path(FFMPEG_NAME)
+        if not os.path.exists(ffmpeg_exec):
+            ffmpeg_exec = "ffmpeg"
+
         proc = await asyncio.create_subprocess_exec(
-            utils.full_path(FFMPEG_NAME),
+            ffmpeg_exec,
             "-y",
             "-i", file_path,
             "-af", f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11",
@@ -70,10 +78,6 @@ async def normalize_audio(file_path: str, target_lufs: float = TARGET_LUFS) -> t
 
 # ── Robust Gemini AI Status Generation Engine ───────────────────────────────
 async def fetch_random_chat_history(guild):
-    """
-    Randomized historical chat sampler:
-    Picks a random text channel and samples 50 messages from a random point in time.
-    """
     candidate_channels = [
         c for c in guild.text_channels 
         if c.permissions_for(guild.me).read_message_history and c.permissions_for(guild.me).read_messages
@@ -193,7 +197,7 @@ async def update_bot_status(guild) -> tuple[str, str]:
 def get_available_sounds():
     dir_path = utils.full_path(SOUNDS_DIR_NAME)
     if not os.path.exists(dir_path):
-        os.makedirs(dir_path)
+        os.makedirs(dir_path, exist_ok=True)
     files = [f for f in os.listdir(dir_path) if f.endswith(('.mp3', '.wav', '.ogg', '.flac', '.m4a'))]
     return files if files else ["default_cheer.mp3"]
 
@@ -368,9 +372,18 @@ async def do_upload(user_id: str, filename: str, file_bytes: bytes, sound_name: 
     if not safe_basename.endswith(ext):
         safe_basename += ext
 
-    target_path = utils.full_path(SOUNDS_DIR_NAME, safe_basename)
-    with open(target_path, "wb") as f:
-        f.write(file_bytes)
+    sounds_dir = utils.full_path(SOUNDS_DIR_NAME)
+    if not os.path.exists(sounds_dir):
+        os.makedirs(sounds_dir, exist_ok=True)
+
+    target_path = os.path.join(sounds_dir, safe_basename)
+    
+    try:
+        with open(target_path, "wb") as f:
+            f.write(file_bytes)
+    except Exception as exc:
+        logger.error(f"Failed to write sound file: {exc}")
+        return False, f"❌ Server file write error: {exc}"
 
     ok, msg = await normalize_audio(target_path)
     database.add_user_sound(user_id, safe_basename, clean_title, target_path)
@@ -415,7 +428,10 @@ async def slash_upload(interaction: discord.Interaction, file: discord.Attachmen
     except Exception as e:
         logger.error(f"Slash upload failed: {e}")
         try:
-            await interaction.followup.send(f"❌ Upload failed: {e}", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(f"❌ Upload failed: {e}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ Upload failed: {e}", ephemeral=True)
         except Exception:
             pass
 
@@ -528,7 +544,6 @@ async def cmd_stats(ctx):
 @tasks.loop(hours=6)
 async def auto_status_loop():
     if bot.guilds:
-        # Pick 1 random guild to update status once per 6 hours (prevents multi-server loops & rate limits)
         guild = random.choice(bot.guilds)
         await update_bot_status(guild)
 
@@ -541,7 +556,6 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Failed to sync slash commands: {e}")
 
-    # Set status ONCE on boot for 1 guild
     if bot.guilds:
         await update_bot_status(bot.guilds[0])
 
