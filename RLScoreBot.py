@@ -360,15 +360,6 @@ async def cmd_play(interaction: discord.Interaction, sound_name: str = None):
     else:
         await interaction.response.send_message("⏯️ Bot is already playing a sound.", ephemeral=True)
 
-@bot.tree.command(name="status_sync", description="Trigger an AI-generated custom status from general chat history.")
-async def cmd_status_sync(interaction: discord.Interaction):
-    await interaction.response.defer()
-    status_text = await update_bot_status(interaction.guild)
-    if status_text:
-        await interaction.followup.send(f"✅ Updated bot status to: \"{status_text}\"")
-    else:
-        await interaction.followup.send("⚠️ Could not generate status. Ensure `GEMINI_API_KEY` is configured in .env and a 'general' text channel exists.")
-
 @bot.tree.command(name="stats", description="Display goal statistics.")
 async def cmd_stats(interaction: discord.Interaction):
     stats = database.get_global_stats()
@@ -395,6 +386,10 @@ async def on_ready():
         logger.info(f"Synced {len(synced)} slash commands globally.")
     except Exception as e:
         logger.error(f"Failed to sync slash commands: {e}")
+
+    # Generate custom status immediately upon connection for all guilds
+    for guild in bot.guilds:
+        await update_bot_status(guild)
 
     if not auto_status_loop.is_running():
         auto_status_loop.start()
