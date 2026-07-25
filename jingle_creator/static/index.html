@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jingle Creator — RLScoreBot</title>
+  <meta name="description" content="Create custom goal jingles for RLScoreBot. Paste a YouTube link, trim the clip, add fades, and download your perfect jingle." />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎵</text></svg>" />
+</head>
+<body>
+
+<div class="app-wrapper">
+
+  <!-- ── Header ── -->
+  <header>
+    <div class="logo-wrap">
+      <div class="logo-icon" aria-hidden="true">🎵</div>
+      <span class="logo-title">Jingle Creator</span>
+    </div>
+    <p class="header-subtitle">Extract &amp; craft the perfect goal sound for <strong>RLScoreBot</strong></p>
+  </header>
+
+  <!-- ── Step 1: URL Input ── -->
+  <section class="card active-glow" aria-label="YouTube URL input">
+    <div class="card-label">Step 1 — YouTube URL</div>
+    <div class="url-row">
+      <div class="input-wrap">
+        <span class="input-icon" aria-hidden="true">▶</span>
+        <input
+          type="url"
+          id="yt-url"
+          placeholder="https://www.youtube.com/watch?v=..."
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="YouTube URL"
+        />
+      </div>
+      <button class="btn btn-primary" id="load-btn" onclick="loadVideo()" aria-label="Load video">
+        <span class="btn-icon">⚡</span> Load
+      </button>
+    </div>
+  </section>
+
+  <!-- ── Video Info Card ── -->
+  <section class="card" id="video-info-card" aria-label="Video information" aria-live="polite">
+    <div class="card-label">Video</div>
+    <div class="video-info-inner">
+      <img class="video-thumb" id="video-thumb" src="" alt="Video thumbnail" />
+      <div class="video-meta">
+        <div class="video-title" id="video-title">Loading...</div>
+        <div class="video-uploader" id="video-uploader"></div>
+        <div class="video-duration" id="video-duration-display"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Step 2: Trim ── -->
+  <section class="card" id="trim-card" aria-label="Trim audio section">
+    <div class="card-label">Step 2 — Trim</div>
+
+    <div class="time-display-row">
+      <div class="time-chip">
+        <span class="time-chip-label">Start</span>
+        <span class="time-chip-value" id="start-time-display">0:00.0</span>
+      </div>
+      <div class="selected-duration" id="selected-duration">— select a range —</div>
+      <div class="time-chip">
+        <span class="time-chip-label">End</span>
+        <span class="time-chip-value" id="end-time-display">0:00.0</span>
+      </div>
+    </div>
+
+    <div class="timeline-wrap" role="group" aria-label="Trim timeline">
+      <div class="timeline-track">
+        <div class="timeline-fill" id="timeline-fill"></div>
+      </div>
+      <div class="dual-range">
+        <input type="range" id="start-handle" min="0" max="100" value="0" step="0.1"
+               aria-label="Trim start" oninput="onStartChange()" />
+        <input type="range" id="end-handle" min="0" max="100" value="100" step="0.1"
+               aria-label="Trim end" oninput="onEndChange()" />
+      </div>
+      <div class="timeline-ticks" id="timeline-ticks" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <!-- ── Step 3: Fades ── -->
+  <section class="card" id="fades-card" aria-label="Fade effects">
+    <div class="card-label">Step 3 — Fades</div>
+    <div class="fades-grid">
+      <div class="fade-control">
+        <label for="fade-in-slider">
+          Fade In
+          <span class="fade-value" id="fade-in-value">0.0s</span>
+        </label>
+        <input type="range" id="fade-in-slider" class="fade-slider"
+               min="0" max="5" step="0.1" value="0"
+               aria-label="Fade in duration"
+               oninput="updateFadeDisplay('fade-in')" />
+      </div>
+      <div class="fade-control">
+        <label for="fade-out-slider">
+          Fade Out
+          <span class="fade-value" id="fade-out-value">0.0s</span>
+        </label>
+        <input type="range" id="fade-out-slider" class="fade-slider"
+               min="0" max="5" step="0.1" value="0"
+               aria-label="Fade out duration"
+               oninput="updateFadeDisplay('fade-out')" />
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Step 4: Output ── -->
+  <section class="card" id="output-card" aria-label="Download jingle">
+    <div class="card-label">Step 4 — Download</div>
+
+    <div class="filename-row">
+      <label for="filename-input">Name</label>
+      <input type="text" id="filename-input" class="filename-input"
+             placeholder="my-jingle" maxlength="60" aria-label="Output filename" />
+      <span class="filename-ext">.mp3</span>
+    </div>
+
+    <div class="action-buttons">
+      <button class="btn btn-secondary" id="preview-btn" onclick="previewJingle()" aria-label="Preview jingle in browser">
+        <span class="btn-icon">▶</span> Preview
+      </button>
+      <button class="btn btn-cyan" id="download-btn" onclick="downloadJingle()" aria-label="Download jingle as MP3">
+        <span class="btn-icon">⬇</span> Download
+      </button>
+    </div>
+
+    <!-- Audio Player -->
+    <div id="audio-player-section" aria-live="polite">
+      <div class="audio-player-wrap">
+        <div class="audio-player-label">🎧 Preview</div>
+        <audio id="audio-player" controls preload="none" aria-label="Audio preview player"></audio>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Footer ── -->
+  <footer>
+    <p class="footer-text">
+      Made for <a href="https://github.com" class="footer-link">RLScoreBot</a> — paste, trim, download, and upload via <code>&gt;upload</code>
+    </p>
+  </footer>
+
+</div>
+
+<!-- ── Loading Overlay ── -->
+<div class="loading-overlay" id="loading-overlay" role="status" aria-live="assertive">
+  <div class="spinner" aria-hidden="true"></div>
+  <div class="loading-msg" id="loading-msg">Loading…</div>
+</div>
+
+<!-- ── Toast Container ── -->
+<div class="toast-container" id="toast-container" aria-live="polite" role="alert"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

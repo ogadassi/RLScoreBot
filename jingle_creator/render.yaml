@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: jingle-creator
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 10000
