@@ -861,6 +861,14 @@ async def on_ready():
     logger.success(f"Connected to Discord as {bot.user}")
     logger.divider()
 
+    # ── Clear any leftover slash commands from the old cloud version ──────
+    try:
+        bot.tree.clear_commands(guild=None)
+        await bot.tree.sync()
+        logger.info("Cleared all global slash commands from Discord.")
+    except Exception as e:
+        logger.warn(f"Could not clear slash commands: {e}")
+
     if not auto_status_loop.is_running():
         auto_status_loop.start()
         logger.info("Custom status auto-update loop started.")
